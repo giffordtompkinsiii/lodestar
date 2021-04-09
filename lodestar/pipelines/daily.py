@@ -149,5 +149,5 @@ if __name__ == '__main__':
                             / (b.cnt_day + b.cnt_qtr)
     b['confidence'] = (b.sum_day + b.sum_qtr) / (b.cnt_day + b.cnt_qtr)
     import_df = prices_df.combine_first(b[['believability','confidence']])
-    asset = update_database_object(import_df=import_df)
+    # asset = update_database_object(import_df=import_df)
     
