@@ -91,8 +91,8 @@ def calculate_growth_tidemarks(asset:Asset, dataframe: pd.DataFrame):
     growth_tm.columns.name = 'tidemark_id'
 
     growth_tm =  growth_tm.stack() \
-                         .reorder_levels(['asset_id','tidemark_id','date']) \
-                         .sort_index()
+                          .reorder_levels(['asset_id','tidemark_id','date']) \
+                          .sort_index()
 
     growth_tm.name = 'value'
     return pd.DataFrame(growth_tm)
