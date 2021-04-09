@@ -1,11 +1,14 @@
-from ..database.maps import tidemark_map
+import numpy as np 
+import pandas as pd
+
+from ..database.maps import asset_map, tidemark_map
 from ..database.functions import collection_to_dataframe
 
-from .prices import assets, get_prices
+from .prices import get_prices
 
 # Need to calculate new believabilities before importing new prices.
 # TODO: Could simply get qtrly_believability, and then join with daily_b score and take weighted average.
-prices_df = get_prices(asset)
+
 
 def get_qtr_believability(asset):
     # get qtrly believability score.
@@ -32,7 +35,8 @@ def get_qtr_believability(asset):
 
 
 if __name__=='__main__':
-    asset = assets[3]
+    asset = asset_map[3]
+    prices_df = get_prices(asset)
     df = get_qtr_believability(asset)
     print(df.tail(15))
 
