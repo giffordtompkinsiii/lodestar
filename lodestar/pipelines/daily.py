@@ -1,7 +1,7 @@
 from ..tidemarks import get_scores
 
 from ..database.maps import asset_map, tidemark_map, tm_name_id_map
-from ..database.models import Asset, PriceHistory
+from ..database.models import Asset, PriceHistory, TidemarkDaily
 from ..database.functions import (collection_to_dataframe as to_df,
                                   update_database_object)
 
@@ -92,6 +92,8 @@ def get_historical_prices(asset) -> pd.DataFrame:
     last_date = asset.current_price.date
     new_prices = get_prices(asset, last_date=last_date)
 
+    if new_prices.empty:
+        return historical_price_df
     return historical_price_df.combine_first(new_prices)
 
 def get_daily_tidemarks(asset: Asset):
@@ -109,7 +111,7 @@ def get_daily_tidemarks(asset: Asset):
 
     return dataframe
 
-def get_daily_scores(asset):
+def tidemarks_wide_to_long(asset):
     daily_tm = get_daily_tidemarks(asset)
     tidemarks = daily_tm.rename(columns=tm_name_id_map)
     tidemarks.columns.name = 'tidemark_id'
@@ -118,10 +120,12 @@ def get_daily_scores(asset):
                                           ['asset_id','tidemark_id','date']) \
                                       .sort_index(), 
                              columns=['value'])
+    return tidemarks 
 
+def get_daily_scores(asset):
+    tidemarks = tidemarks_wide_to_long(asset)
     return get_tidemark_scores(tidemarks, daily=True)
 
-# TODO: add option to just do both daily and quarterly. This is messy.
 def get_believability(asset, daily=None):
     if daily is None:
         scores_day = get_daily_scores(asset).unstack('tidemark_id').score
@@ -139,15 +143,48 @@ def get_believability(asset, daily=None):
         scores_qtr = tidemarks.unstack('tidemark_id').score
         return calc_believability(scores_qtr, daily=daily)
 
-if __name__ == '__main__':
-    asset = asset_map[3]
-    prices_df = get_historical_prices(asset)
-    daily_tm = get_daily_tidemarks(asset)
-    scores_df = get_daily_scores(asset)
-    b = get_believability(asset, daily=None)
+def prep_believability(asset):
+    b = get_believability(asset)
     b['believability'] = ((b.b_day * b.sum_day) + (b.b_qtr + b.sum_qtr)) \
                             / (b.cnt_day + b.cnt_qtr)
     b['confidence'] = (b.sum_day + b.sum_qtr) / (b.cnt_day + b.cnt_qtr)
-    import_df = prices_df.combine_first(b[['believability','confidence']])
-    # asset = update_database_object(import_df=import_df)
-    
+    return prices_df.combine_first(b[['believability','confidence']])
+
+def get_new_price_ids(asset, tidemarks, last_date):
+    new_prices = get_historical_prices(asset)
+    new_prices = new_prices.loc[(asset.id,pd.to_datetime(last_date)):] \
+                           .iloc[1:]
+
+    tidemarks = tidemarks.join(new_prices[['id']], 
+                                on=['asset_id','date'], 
+                                how='inner') \
+                         .rename(columns={'id':'price_id'}) \
+                         .sort_index()
+
+    return tidemarks
+
+        
+
+if __name__ == '__main__':
+    asset = asset_map[3]
+    last_date = asset.current_price.date
+    prices_df = get_historical_prices(asset)
+    daily_tm = get_daily_tidemarks(asset)
+    tidemarks = tidemarks_wide_to_long(asset)
+    scores_df = get_daily_scores(asset)
+    b = get_believability(asset, daily=None)
+    import_df = prep_believability(asset)
+    asset = update_database_object(import_df=import_df, db_table=PriceHistory, 
+                                   db_records=asset.price_history_collection, 
+                                   refresh_object=asset)
+    print(asset.current_price.date)
+    new_prices = to_df(asset.price_history_collection)
+    new_tidemarks = scores_df.join(new_prices[['id']], on=['asset_id','date']) \
+                             .rename(columns={'id':'price_id'})
+    asset = update_database_object(import_df=new_tidemarks, 
+                            db_table=TidemarkDaily, 
+                            db_records=asset.tidemark_history_daily_collection,
+                            refresh_object=asset)
+
+    # After importing prices, must rejoin with daily tidemark calculations to update price_ids. Then insert into database.
+    # After that, we can import price_tidemarks.

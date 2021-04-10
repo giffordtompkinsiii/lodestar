@@ -21,9 +21,9 @@ from tqdm import tqdm
 import pandas as pd
 import decimal
 import datetime as dt
-from sqlalchemy import types, UniqueConstraint
+from sqlalchemy import types, UniqueConstraint, PrimaryKeyConstraint
 from .models import session
-from .. import logger
+from .. import logger, debug
 
 def all_query(db_table):
     """All-Query - Returns all records for given table object."""
@@ -41,10 +41,17 @@ def get_unique_cols(db_table=None, query_results=None):
         table_object = db_table.__table__
     else:
         table_object = query_results[0].__table__
-    return table_object, list(set(sorted([col.name \
-                    for con in table_object.constraints \
-                    if con.__class__ is UniqueConstraint \
-                    for col in con.columns])))
+    
+    table_cons = table_object.constraints
+    unique_cols = sorted(set([
+                col.name for cols in [
+                    c.columns for c in table_cons if type(c) is UniqueConstraint
+                ] for col in cols]))
+    primary_keys = sorted(set([
+            col.name for cols in [
+                c.columns for c in table_cons if type(c) is PrimaryKeyConstraint
+            ] for col in cols]))
+    return table_object, list(unique_cols), list(primary_keys)
 
 def collection_to_dataframe(query_results,
                             db_table=None,
@@ -68,8 +75,8 @@ def collection_to_dataframe(query_results,
         passed to it Indexed by the unique key columns of the table.
     """
     # Set unique columns as index columns
-    table_object, idx_cols = get_unique_cols(db_table=db_table, 
-                               query_results=query_results)
+    table_object, idx_cols, _ = get_unique_cols(db_table=db_table, 
+                                                query_results=query_results)
 
     dataframe = pd.DataFrame([
         {k:v for k,v in q.__dict__.items() if k in table_object.columns} \
@@ -88,15 +95,15 @@ def collection_to_dataframe(query_results,
 
     try:
         df = dataframe.astype(dtype_dict)\
-                  .set_index(idx_cols)\
-                  .sort_index()
+                      .set_index(idx_cols)\
+                      .sort_index()
         return df
     except KeyError as e:
         logger.log(level=1, msg=e)
         return dataframe
 
 def compare_to_db(import_df: pd.DataFrame, db_records: list, db_table,
-                  debug=False)->(list, list):
+                  ignore_nulls=False, debug=False)->(list, list):
     """Return import or update items based on existing records.
 
     Takes the new and/or calculated values and compares them to the current database model.
@@ -119,70 +126,47 @@ def compare_to_db(import_df: pd.DataFrame, db_records: list, db_table,
     # Convert database records to dataframe with unique key columns as index.
 
     insert_objects, update_objects = [], []
+    if import_df.empty:
+        return insert_objects, update_objects
 
-    table_object, idx_cols = get_unique_cols(db_table=db_table, 
-                                             query_results=db_records)
+    table_object, idx_cols, prmy_keys = get_unique_cols(db_table=db_table, 
+                                                        query_results=db_records)
     if debug:
         print(idx_cols)
+
     db = collection_to_dataframe(db_records, db_table)
     if debug:
-        print("Database Records.")
-        print(db.head())
+        print("Database Records:", db.shape)
     # Set index of importing dataframe to match database for comparision.
-    im = import_df.reset_index()\
-                  .drop_duplicates(idx_cols)\
-                  .set_index(idx_cols)
+    # TODO: see if the following function replace previously used commented function
+    im = import_df.loc[import_df.index.drop_duplicates()] \
+                  .drop(columns=prmy_keys, errors='ignore')
+    if not ignore_nulls:
+        im = im.dropna()
+
     if debug:
-        print(im)
+        print("Cleaned import dataframe:", import_df.shape, "->", im.shape)
+
+    if im.empty:
+        return insert_objects, update_objects
+
     # If there are not previous database records, then return the insert objects 
     # as the entire import dataframe converted to records.
     if db.empty:
-        if im.dropna().empty:
-            return insert_objects, update_objects
-        else:
-            return im.reset_index().to_dict(orient="records"), []
+        insert_objects = im.reset_index().to_dict(orient="records")
+    else:
+        diff_idx = im.compare(db.reindex_like(im)).index
+        insert_idx = diff_idx[~diff_idx.isin(db.index)]
+        update_idx = diff_idx[diff_idx.isin(db.index)]
 
-    df_join = im.join(db, how='left', rsuffix='_db')
+        insert_objects = im.loc[insert_idx] \
+                           .reset_index() \
+                           .to_dict(orient="records")
 
-    # Values will be inserted if there is no `id` value present in the database.
-    insert_mask = df_join.id.isnull()
-
-    # Values will be updated where there exists an `id` value, but the stored 
-    # values are unequal (up to 4 decimal places).
-    update_mask = pd.Series(False, index=df_join.index)
-
-    numeric_like_cols = df_join.select_dtypes(include=['number'])
-    for col in [c for c in db.columns if c + '_db' in numeric_like_cols]:
-        import_col = df_join.get(col)
-        database_col = df_join.get(col+'_db')
-        update_mask |= (pd.to_numeric(import_col).round(4) != pd.to_numeric(database_col).round(4))
-
-    non_numeric_like_cols = df_join.select_dtypes(exclude=['number'])
-    for col in [c for c in db.columns if c + '_db' in non_numeric_like_cols]:
-        import_col = df_join.get(col)
-        database_col = df_join.get(col+'_db')
-        update_mask |= (import_col != database_col)
-
-    # Set last modified to current datetime
-    df_join['last_modified'] = dt.datetime.now()
-
-    if insert_mask.any():
-        if debug:
-            print("Insert Mask", len(insert_mask))
-        insert_objects = df_join[insert_mask].dropna(subset=im.columns)
-        if debug:
-            print("Insert Objects", insert_objects.shape)
-        if not insert_objects.empty:
-            insert_objects = insert_objects.reset_index()
-        insert_objects = insert_objects.drop(columns='id')\
+        update_objects = im.loc[update_idx]
+        update_objects['id'] = db.loc[update_idx,'id']
+        update_objects = update_objects.reset_index() \
                                        .to_dict(orient="records")
-
-    if (~insert_mask & update_mask).any():
-        update_objects = df_join[~insert_mask & update_mask]\
-                                .dropna(subset=im.columns)
-        if not update_objects.empty:
-            update_objects = update_objects.reset_index()
-        update_objects = update_objects.to_dict(orient="records")
 
     return insert_objects, update_objects
 
