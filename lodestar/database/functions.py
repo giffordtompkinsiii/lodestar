@@ -31,6 +31,28 @@ def all_query(db_table):
                   .order_by(*[c for c in db_table.__table__.primary_key.columns])\
                   .all()
 
+def greater(db_table, col:str, val, inclusive: bool = False):
+    if inclusive:
+        return getattr(db_table, col) >= val
+    return getattr(db_table, col) > val 
+
+def less(db_table, col:str, val, inclusive: bool = False):
+    if inclusive:
+        return getattr(db_table, col) <= val
+    return getattr(db_table, col) < val 
+
+def equals(db_table, col:str, val):
+    return getattr(db_table, col) == val
+
+def filter_query(db_table, criterion):
+    q = session.query(db_table)
+    for criteria in criterion:
+        q = q.filter(criteria)
+
+    return q.order_by(*[c for c in db_table.__table__.primary_key.columns]).all()
+
+    
+
 def get_unique_cols(db_table=None, query_results=None):
     """Returns all columns under a tables Unique Constraint.
     
@@ -103,7 +125,8 @@ def collection_to_dataframe(query_results,
         return dataframe
 
 def compare_to_db(import_df: pd.DataFrame, db_records: list, db_table,
-                  ignore_nulls=False, debug=False)->(list, list):
+                  insert_only: bool = False, ignore_nulls=False, 
+                  debug=False)->(list, list):
     """Return import or update items based on existing records.
 
     Takes the new and/or calculated values and compares them to the current database model.
@@ -157,12 +180,13 @@ def compare_to_db(import_df: pd.DataFrame, db_records: list, db_table,
     else:
         diff_idx = im.compare(db.reindex_like(im)).index
         insert_idx = diff_idx[~diff_idx.isin(db.index)]
-        update_idx = diff_idx[diff_idx.isin(db.index)]
-
         insert_objects = im.loc[insert_idx] \
                            .reset_index() \
                            .to_dict(orient="records")
+        if insert_only:
+            return insert_objects, []
 
+        update_idx = diff_idx[diff_idx.isin(db.index)]
         update_objects = im.loc[update_idx]
         update_objects['id'] = db.loc[update_idx,'id']
         update_objects = update_objects.reset_index() \
@@ -171,8 +195,8 @@ def compare_to_db(import_df: pd.DataFrame, db_records: list, db_table,
     return insert_objects, update_objects
 
 
-def update_database_object(import_df, db_records, db_table, debug=False,        
-                           refresh_object=None):
+def update_database_object(import_df, db_records, db_table, debug: bool = False,
+                           insert_only: bool = False, refresh_object=None):
     """Export items to database as insert or update statements.
     
     This function uses the return from `compare_to_db(import_df=import_df, 
@@ -186,6 +210,7 @@ def update_database_object(import_df, db_records, db_table, debug=False,
     insert_objects, update_objects = compare_to_db(import_df=import_df, 
                                                    db_records=db_records, 
                                                    db_table=db_table,
+                                                   insert_only=insert_only,
                                                    debug=debug)
     if debug:
         print(f"Inserting {len(insert_objects)} and updating {len(update_objects)}")
