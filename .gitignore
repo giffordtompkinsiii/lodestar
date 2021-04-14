@@ -1,3 +1,4 @@
+# tree -I '*.pyc|__pycache__|*.xlsm|*.zip|*.sql|*.whl|build/' | pbcopy
 .python-version
 .vscode/
 __pycache__
