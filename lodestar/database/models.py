@@ -64,7 +64,7 @@ Base.prepare(reflect=True,
              name_for_collection_relationship=name_for_collection_relationship)
 
 ## TABLE DEFINITIONS
-# Asset = Base.classes.assets
+Asset = Base.classes.assets
 PriceHistory = Base.classes.price_history
 TidemarkHistory = Base.classes.tidemark_history
 TidemarkDaily = Base.classes.tidemark_history_daily
