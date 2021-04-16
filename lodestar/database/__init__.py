@@ -31,6 +31,7 @@ connect_args = {
 }
 
 def formatting_proxy(home_directory):
+    """Format url for connection proxy."""
     # print("Formatting proxy")
     proxy_str = os.path.join(home_directory,"cloud_sql_proxy") 
     proxy_dir = os.path.join(home_directory,"cloudsql")
