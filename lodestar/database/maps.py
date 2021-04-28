@@ -1,3 +1,4 @@
+from . import logger
 from .models import Asset, Tidemark
 from .functions import all_query, collection_to_dataframe 
 

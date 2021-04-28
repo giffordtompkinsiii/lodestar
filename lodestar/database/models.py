@@ -17,14 +17,14 @@ Objects
 tables : list
     table names from the database from which to make objects
 """
-from . import engine, metadata
+import warnings
+
+from . import engine, metadata, logger
+
 from sqlalchemy import (Boolean, Column, Date, DateTime, ForeignKey, Float, 
-                        Integer, Table, Text, UniqueConstraint)
+                        Integer, Table, Text, UniqueConstraint, exc as sa_exc)
 from sqlalchemy.orm import sessionmaker, relationship
 from sqlalchemy.ext.automap import automap_base
-import warnings
-from sqlalchemy import exc as sa_exc
-
 
 
 tables = ['assets',
@@ -36,12 +36,16 @@ tables = ['assets',
             'tidemark_types']
 
 # Extract MetaData and create tables from them using AutoMap.
-metadata.reflect(
-    extend_existing=True,
-    views=True,
-    only=tables)
+with warnings.catch_warnings():
+    warnings.simplefilter('ignore', sa_exc.SAWarning)
+
+    metadata.reflect(
+        extend_existing=True,
+        views=True,
+        only=tables)
 
 Base = automap_base(metadata=metadata)
+
 ## >>> INSERT VIEW DEFINITIONS HERE
 def name_for_collection_relationship(base, local_cls, referred_cls, constraint):
     reflexive_names = {
@@ -55,13 +59,15 @@ def name_for_collection_relationship(base, local_cls, referred_cls, constraint):
         try:
             return reflexive_names[constraint.name]
         except KeyError as ke:
-            print("Missing ReflexiveKey for:", local_cls.__name__)
-            print("Constraint Name:", constraint.name)
+            logger.critical("Missing ReflexiveKey for:", local_cls.__name__)
+            logger.critical("Constraint Name:", constraint.name)
     else:
         return referred_cls.__name__.lower() + "_collection"
 
 
-Base.prepare(reflect=True,
+with warnings.catch_warnings():
+    warnings.simplefilter('ignore', sa_exc.SAWarning)
+    Base.prepare(reflect=True,
              name_for_collection_relationship=name_for_collection_relationship)
 
 ## TABLE DEFINITIONS
@@ -73,7 +79,9 @@ Tidemark = Base.classes.tidemarks
 TidemarkType = Base.classes.tidemark_types
 
 ## CUSTOM RELATIONSHIP DEFINITIONS
-Asset.current_price = relationship(PriceHistory,
+with warnings.catch_warnings():
+    warnings.simplefilter('ignore', sa_exc.SAWarning)
+    Asset.current_price = relationship(PriceHistory,
                                 primaryjoin=(Asset.id==PriceHistory.asset_id),
                                 order_by=lambda: PriceHistory.date.desc(),
                                 uselist=False)

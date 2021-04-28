@@ -22,8 +22,9 @@ import pandas as pd
 import decimal
 import datetime as dt
 from sqlalchemy import types, UniqueConstraint, PrimaryKeyConstraint
-from .models import session
-from .. import logger, debug
+from psycopg2 import errors as psycopg_errors
+from . import logger
+from .models import session, Asset
 
 def all_query(db_table):
     """All-Query - Returns all records for given table object."""
@@ -216,3 +217,22 @@ def update_database_object(import_df, db_records, db_table, debug=False,
         return refresh_object
 
     return refresh_object
+
+def add_assets(*asset_names):
+    for asset_name in asset_names:
+        logger.info(f"Importing new asset: {asset_name}")
+        # new_asset = Asset()
+        # new_asset.asset = asset_name 
+        try:
+            session.merge(Asset(asset=asset_name))
+        except IntegrityError:
+            continue
+    session.commit()
+        # try:
+        #     session.commit()
+        # except psycopg_errors.UniqueViolation:
+        #     logger.info(f"{asset_name} already in database.")
+        #     session
+
+if __name__=='__main__':
+    add_assets('ROAD', 'MSTR')
