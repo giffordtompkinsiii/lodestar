@@ -24,14 +24,13 @@ import datetime as dt
 
 from tqdm import tqdm
 
-from .. import data_file_dir
-
+from .. import logger, data_file_dir
 from ..database.maps import asset_map, tidemark_map
 from ..database.models import Asset, PriceHistory, Tidemark, TidemarkType
 from ..database.functions import all_query, collection_to_dataframe as to_df
 
 debug = False
-
+logger.info(f"Debug set to {debug}.")
 tt_map = {tt.id: tt for tt in all_query(TidemarkType)}
 scores_pickle_path = os.path.join(data_file_dir, 'scores_all.pickle')
 pickle_path = os.path.join(data_file_dir, 'believability.pickle')
@@ -51,8 +50,7 @@ def format_tidemarks(asset: Asset, tidemarks_collection: list)->pd.DataFrame:
     """
 
     if not tidemarks_collection:
-        if debug:
-            print("No tidemarks.")
+        logger.warn(f"No tidemarks for [{asset.id} - {asset.asset}]. Returning empty dataframe")
         return pd.DataFrame()
 
     tidemarks_df = to_df(tidemarks_collection)[['value']].unstack('tidemark_id')\
@@ -63,13 +61,14 @@ def format_tidemarks(asset: Asset, tidemarks_collection: list)->pd.DataFrame:
                            freq='Q').values[1:]:
         tidemarks_df = tidemarks_df.reindex(tidemarks_df.index.insert(loc=-1, item=(asset.id, d)))
     tidemarks_df = tidemarks_df.sort_index().fillna(method='ffill')
-    if debug:
-        print(tidemarks_df.index.names)
-        print(tidemarks_df.columns)
+    logger.debug(tidemarks_df.index.names)
+    logger.debug(tidemarks_df.columns)
     return tidemarks_df.rename(columns=lambda col: tidemark_map[col].tidemark, 
                                level='tidemark_id')
 
-def format_growth_tidemarks(asset: Asset, tidemarks_collection: list, debug: bool = False)->pd.DataFrame:
+def format_growth_tidemarks(asset: Asset, 
+                            tidemarks_collection: list, 
+                            debug: bool = False)->pd.DataFrame:
     """Format the tidemarks.
 
     Parameter
@@ -84,8 +83,7 @@ def format_growth_tidemarks(asset: Asset, tidemarks_collection: list, debug: boo
     """
 
     if not tidemarks_collection:
-        if debug:
-            print("No tidemarks.")
+        logger.warn(f"No tidemarks for [{asset.id} - {asset.asset}]. Returning empty dataframe")
         return pd.DataFrame()
 
     df = to_df(tidemarks_collection)[['id','value']]
@@ -97,17 +95,40 @@ def format_growth_tidemarks(asset: Asset, tidemarks_collection: list, debug: boo
 
     return df
 
-def get_scores(dataframe: pd.DataFrame, freq_per_yr: int = 4):
+def get_scores(dataframe: pd.DataFrame, daily: False):
     '''Return the rolling median, standard deviation and scores.
-    TODO: make this based on asseet.
+
+    Parameters
+    ==========
+    dataframe: pd.DataFrame()
+        Tidemark values with `date` type index.
+    daily: bool
+        Whether the scores are to be calculated on a daily or quarterly basis.
+
+    Returns
+    =======
+    meds: pd.DataFrame
+        20-year rolling medians.
+    stds: pd.DataFrame
+        20-year rolling standard deviations.
+    scores: pd.DataFrame
+        Daily tidemark scores.
     '''
+    freq_per_yr = (daily * 252) or 4
+
     if dataframe.empty:
         return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
     meds = dataframe.rolling(window=freq_per_yr * 20, 
                              min_periods=freq_per_yr)\
-                    .median()
+                    .median() \
+                    .reset_index(['asset_id','date'], drop=True)
+
     stds = dataframe.rolling(window=freq_per_yr * 20, 
                              min_periods=freq_per_yr)\
-                    .std()
-    scores = (0.5 + (dataframe - meds) / (2 * 1.382 * stds))
+                    .std() \
+                    .reset_index(['asset_id','date'], drop=True)
+
+    scores = (0.5 + (dataframe - meds) / (2 * 1.382 * stds)) \
+                    .reset_index(['asset_id','date'], drop=True)
+                    
     return meds, stds, scores

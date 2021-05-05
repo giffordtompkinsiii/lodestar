@@ -56,7 +56,8 @@ def get_unique_cols(db_table=None, query_results=None):
 
 def collection_to_dataframe(query_results,
                             db_table=None,
-                            drop_last_modified=True)->pd.DataFrame:
+                            drop_last_modified=True,
+                            include_index=False)->pd.DataFrame:
     """Returns items in a models collection attribute as a dataframe.
 
     This function takes the list of database objects and extracts their
@@ -96,9 +97,10 @@ def collection_to_dataframe(query_results,
 
     try:
         df = dataframe.astype(dtype_dict)\
-                      .set_index(idx_cols)\
-                      .sort_index()
-        return df
+                      .set_index(idx_cols)
+        if include_index:
+            df = df.set_index('id', append=True)
+        return df.sort_index()
     except KeyError as e:
         logger.log(level=1, msg=e)
         return dataframe
@@ -218,6 +220,22 @@ def update_database_object(import_df, db_records, db_table, debug=False,
 
     return refresh_object
 
+def add_new_objects(new_objects, refresh_object=None):
+    """Add items to database and refresh relevant objects."""
+    try:
+        session.add_all(new_objects)
+        session.commit()
+    except:
+        session.rollback()
+        for r in new_objects:
+            session.add(r)
+            session.commit()
+    if refresh_object:
+        session.refresh(refresh_object)
+    else:
+        session.expire_all()
+    return new_objects
+
 def add_assets(*asset_names):
     for asset_name in asset_names:
         logger.info(f"Importing new asset: {asset_name}")
@@ -234,5 +252,5 @@ def add_assets(*asset_names):
         #     logger.info(f"{asset_name} already in database.")
         #     session
 
-if __name__=='__main__':
-    add_assets('ROAD', 'MSTR')
+# if __name__=='__main__':
+#     add_assets('ROAD', 'MSTR')
