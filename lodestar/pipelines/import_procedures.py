@@ -39,6 +39,32 @@ tidemarks = all_query(Tidemark)
 
 assets = all_query(Asset)
 
+def get_tidemark_scores(tidemarks: pd.DataFrame, daily=False) -> pd.DataFrame:
+    """Take tidemarks in long form and calculate scores."""
+    assert tidemarks.index.names == ['asset_id','tidemark_id','date']
+    scores_df = tidemarks.copy()
+
+    minimum_periods = (daily * 252) or 4
+
+    grouped_df = scores_df.reset_index('date') \
+                          .groupby(level=[0,1]) \
+                          .rolling(window=20 * minimum_periods, 
+                                   min_periods=minimum_periods, 
+                                   on='date')
+
+    scores_df['std_20y'] = grouped_df.std() \
+                                     .set_index('date', append=True)['value']
+
+    scores_df['med_20y'] = grouped_df.median() \
+                                     .set_index('date', append=True)['value']
+
+    # scores = 0.5 + (values - meds) / (2 * 1.382 * stds)
+    scores_df['score'] = 0.5 + ((scores_df.value - scores_df.med_20y) \
+                            / (2 * 1.382 * scores_df.std_20y))
+
+    return scores_df 
+
+
 def process_tidemarks(asset: Asset, stack: pd.DataFrame) -> Asset:
     """Format dataframe and upload into database.
 
@@ -59,23 +85,9 @@ def process_tidemarks(asset: Asset, stack: pd.DataFrame) -> Asset:
     import_df = tm_history.combine_first(stack)
 
     growth_tm = calculate_growth_tidemarks(asset, import_df)
-    import_df = import_df.combine_first(growth_tm)
+    tidemarks = import_df.combine_first(growth_tm)
 
-    grouped_df = import_df.reset_index('date') \
-                          .groupby(level=[0,1]) \
-                          .rolling(window=80, min_periods=4, on='date')
-
-    import_df['std_20y'] = grouped_df.std() \
-                                     .set_index('date', append=True)['value']
-
-    import_df['med_20y'] = grouped_df.median() \
-                                     .set_index('date', append=True)['value']
-
-    # scores = 0.5 + (values - meds) / (2 * 1.382 * stds)
-    import_df['score'] = 0.5 + ((import_df.value - import_df.med_20y) \
-                            / (2 * 1.382 * import_df.std_20y))
-
-    return import_df
+    return get_tidemark_scores(tidemarks)
 
 
 def format_tidemarks(asset, workbook):

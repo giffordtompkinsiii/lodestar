@@ -11,12 +11,13 @@ models
 functions
     Database-to-Pandas-DataFrame compatability functions.
 """
-import warnings
-from sqlalchemy import exc as sa_exc
+
 import os
+import warnings
 import subprocess
+from .. import logger
 from urllib import parse
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, exc as sa_exc
 from sqlalchemy.schema import MetaData
 
 home_dir = os.environ['HOME']
@@ -31,7 +32,7 @@ connect_args = {
 }
 
 def formatting_proxy(home_directory):
-    # print("Formatting proxy")
+    logger.info("Formatting proxy")
     proxy_str = os.path.join(home_directory,"cloud_sql_proxy") 
     proxy_dir = os.path.join(home_directory,"cloudsql")
     instances = "lodestar:us-central1:tidesgroup"
@@ -54,4 +55,4 @@ engine = create_engine(url, connect_args=connect_args)
 metadata = MetaData(bind=engine, schema='financial')
 
 if __name__=='__main__':
-    print(url)
+    logger.info(url)

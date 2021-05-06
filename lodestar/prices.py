@@ -27,20 +27,27 @@ from psycopg2.errors import UniqueViolation
 import sqlalchemy as sql 
 
 from contextlib import redirect_stdout
-from tqdm import tqdm 
+from tqdm import tqdm
 
-from ..database.maps import asset_map
-from ..database.models import Asset, PriceHistory, session
-from ..database.functions import (all_query, update_database_object,
-                                  collection_to_dataframe as to_df)
+from typing import List
+
+from . import logger
+from .database.models import Asset, PriceHistory, session
+from .database.functions import (add_new_objects, all_query, 
+                                 update_database_object, 
+                                 collection_to_dataframe as to_df)
+
 td = dt.date.today()
 end_of_day = (dt.datetime.utcnow() + dt.timedelta(hours=3)).date()
-date_20y_ago = dt.date(td.year - 20, td.month, td.day)
+date_20y_ago = pd.to_datetime(dt.date(td.year - 20, td.month, td.day))
 
-assets = all_query(Asset)
+logger.info(f"End of day: {end_of_day}")
+logger.info(f"20 years ago: {date_20y_ago}")
+
+# assets = all_query(Asset)
 
 def get_prices(asset: Asset, last_date: dt.date = None, 
-                             debug:bool = False)->pd.DataFrame:
+                             debug:bool = False) -> pd.DataFrame:
     """Pull prices from Yahoo!Finance for given `database.models.Asset`.
     
     Returns
@@ -48,40 +55,53 @@ def get_prices(asset: Asset, last_date: dt.date = None,
     pandas.DataFrame: (asset_id, date, price)
         DataFrame of asset's price history.
     """
-    last_date = pd.to_datetime(
-                    getattr(
-                        getattr(asset, 'current_price', None), 
-                        'date', 
-                        date_20y_ago
-                    )
-                )
+    if hasattr(asset.current_price, 'date'):
+        last_date = pd.to_datetime(asset.current_price.date) or date_20y_ago
+    else:
+        last_date = date_20y_ago
+
+    logger.info(f"{asset.asset} last date: {last_date}")
 
     history = yf.Ticker(asset.asset.replace(' ','-')) \
                 .history(start=last_date,
                          end=end_of_day, 
                          # 9PM is closing time in UTC
                          debug=debug)
+    history = history[history.index > last_date]
+    logger.info(
+        f"{asset.asset} price records since last date: {history.shape[0]}")
 
     if not asset.price_history_collection and history.empty:
-        print(f"No yfinance records or database records for {asset.asset}")
+        info.warning(f"No yfinance records or database records for {asset.asset}")
         return pd.DataFrame()
-
-    import_df = history[history.index > last_date]
-    time.sleep(10)
-
-    if import_df.empty:
-        return import_df
-
-    import_df = import_df.reset_index()[['Date','Close']] \
-                         .rename(columns={'Date':'date','Close':'price'})
+    
+    logger.info("Sleeping for yFinance API.")
+    time.sleep(1)
+    import_df = history.reset_index()[['Date','Close']] \
+                       .rename(columns={'Date':'date','Close':'price'})
     import_df['asset_id'] = asset.id
 
     return import_df.set_index(['asset_id','date'])
 
+def run_prices(asset: Asset) -> List[PriceHistory]:
+    """Create and export new PriceHistory objects."""
+    prices = get_prices(asset).reset_index().itertuples(index=False)
+    asset.new_prices = [PriceHistory(**p._asdict()) for p in prices]
+    # for p in asset.new_prices:
+    #     logger.debug(f"{p.date}")
+    session.add_all(asset.new_prices)
+    session.commit()
+    session.refresh(asset)
+
+    return asset.new_prices
 
 if __name__=='__main__':
-    asset = asset_map[3]
-    prices = get_prices(asset)
+    from .database.maps import asset_map
+    asset = asset_map[1]
+    new_prices = run_prices(asset)
+
+
+
 
 
 
