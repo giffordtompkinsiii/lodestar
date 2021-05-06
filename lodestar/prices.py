@@ -76,7 +76,7 @@ def get_prices(asset: Asset, last_date: dt.date = None,
         return pd.DataFrame()
     
     logger.info("Sleeping for yFinance API.")
-    time.sleep(10)
+    time.sleep(1)
     import_df = history.reset_index()[['Date','Close']] \
                        .rename(columns={'Date':'date','Close':'price'})
     import_df['asset_id'] = asset.id
@@ -87,6 +87,8 @@ def run_prices(asset: Asset) -> List[PriceHistory]:
     """Create and export new PriceHistory objects."""
     prices = get_prices(asset).reset_index().itertuples(index=False)
     asset.new_prices = [PriceHistory(**p._asdict()) for p in prices]
+    # for p in asset.new_prices:
+    #     logger.debug(f"{p.date}")
     session.add_all(asset.new_prices)
     session.commit()
     session.refresh(asset)

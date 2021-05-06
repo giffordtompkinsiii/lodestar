@@ -26,7 +26,7 @@ def update_old_data(asset: Asset):
                       key=lambda p: p.date)
 
     if not bad_records:
-        return
+        return get_new_data(asset)
 
     bad_record = bad_records[0]
     logger.info(f"{asset.id}-{asset.asset}: Bad price record: {bad_record.date}")
