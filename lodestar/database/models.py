@@ -27,13 +27,19 @@ from sqlalchemy.orm import sessionmaker, relationship
 from sqlalchemy.ext.automap import automap_base
 
 
-tables = ['assets',
+tables = ['accounts',
+            'account_types',
+            'api',
+            'assets',
+            'cash_balance_history',
+            'clients',
             'price_history',
             'tidemarks',
             'tidemark_history',
             'tidemark_history_daily',
             'tidemark_terms',
-            'tidemark_types']
+            'tidemark_types',
+            'trade_history']
 
 # Extract MetaData and create tables from them using AutoMap.
 with warnings.catch_warnings():
@@ -71,12 +77,19 @@ with warnings.catch_warnings():
              name_for_collection_relationship=name_for_collection_relationship)
 
 ## TABLE DEFINITIONS
+Account = Base.classes.accounts
+AccountType = Base.classes.account_types
+Api = Base.classes.apis
 Asset = Base.classes.assets
+CashBalance = Base.classes.cash_balance_history
+Client = Base.classes.clients
 PriceHistory = Base.classes.price_history
 TidemarkHistory = Base.classes.tidemark_history
 TidemarkDaily = Base.classes.tidemark_history_daily
 Tidemark = Base.classes.tidemarks
 TidemarkType = Base.classes.tidemark_types
+TradeHistory = Base.classes.trade_history
+
 
 ## CUSTOM RELATIONSHIP DEFINITIONS
 with warnings.catch_warnings():

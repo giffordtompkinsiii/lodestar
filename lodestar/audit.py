@@ -1,6 +1,9 @@
 import time
+
 from .database.maps import asset_map
 from .pipelines.daily import update_old_data
+
+from .. import logger
 
 if __name__=='__main__':
     t_0 = time.time()
