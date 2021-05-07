@@ -11,11 +11,10 @@ create_daily_tidemarks(v:pd.DataFrame)->pd.DataFrame
 from typing import List
 
 from . import *
-from ..pipelines.believability import get_believability
-from ..database.maps import tm_id_name_map, tm_name_id_map
+# , tm_id_map, id_tm_map
 from ..database.models import Asset, PriceHistory, TidemarkDaily, session
 from ..database.functions import add_new_objects, collection_to_dataframe
-
+from ..pipelines.believability import get_believability
 
 pd.options.mode.chained_assignment = None  # default='warn'
 
@@ -39,7 +38,7 @@ def create_daily_tidemarks(price: PriceHistory) -> pd.DataFrame:
     tidemarks = to_df(price.tidemark_history_collection)
     v = tidemarks.reset_index(['date','asset_id']) \
                     .value \
-                    .rename(index=tm_id_name_map)
+                    .rename(index=tm_id_map)
     v['price'] = float(price.price)
 
     for col_name in ['ard_preferred_stock', 
@@ -92,7 +91,7 @@ def create_daily_tidemarks(price: PriceHistory) -> pd.DataFrame:
                                                 - v.cf_cap_expend_inc_fix_asset \
                                                 - v.net_chng_lt_debt) or np.nan)
     daily_tm['px_to_sales_ratio'] = v.price / (v.sales_rev_turn or np.nan)
-    daily_tm = daily_tm.rename(tm_name_id_map) \
+    daily_tm = daily_tm.rename(id_tm_map) \
                        .rename_axis('tidemark_id') \
                        .reset_index()
 

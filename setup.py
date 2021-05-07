@@ -5,7 +5,7 @@ with open ("README.md", "r") as fh:
 
 setuptools.setup(
     name="tidemarks",
-    version="0.0.2",
+    version="0.0.3",
     author="Gifford Tompkins III",
     author_email="giffordtompkinsiii@gmail.com",
     description="Data Pipelines: Extraction, Transformation and Loading Procedures for The Tides Group.",

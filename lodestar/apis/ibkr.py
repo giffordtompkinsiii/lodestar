@@ -15,7 +15,10 @@ IBKR Clients and Wrappers: https://interactivebrokers.github.io/tws-api/client_w
 IBKR COnnectivity: https://interactivebrokers.github.io/tws-api/connection.html
 Research includes: https://realpython.com/python-interface/
 """
+import sys
 import time
+import argparse
+import threading
 import datetime as dt
 
 from ibapi.client import EClient
@@ -31,10 +34,11 @@ from sqlalchemy import exists
 from .google import update_sheet
 
 from .. import logger
-from ..database.maps import api_map, client_map, account_type_map, account_map
+from ..database.maps import (account_map, api_map, asset_map, 
+                             client_map, account_type_map)
 from ..database.functions import all_query, collection_to_dataframe
-from ..database.models import (Account, Asset, Client, CurrentPosition, 
-                               Position, TradeHistory, session)
+from ..database.models import (Account, Asset, Client, Position, 
+                               TradeHistory, session)
 
 
 # from .reports import push_trade_report
@@ -43,7 +47,7 @@ from ..database.models import (Account, Asset, Client, CurrentPosition,
 # using its __get__() method. i.e. `a.func = func.__get__(a)`.
 # https://stackoverflow.com/questions/972/adding-a-method-to-an-existing-object-instance
 
-acct_map = {a.account: a for a in account_map.values()}
+account_map = {a.account: a for a in account_map.values()}
 asset_map = {a.asset: a for a in asset_map.values()}
 api_map = {a.api: a for a in api_map.values()}
 
@@ -99,7 +103,7 @@ class IBapi(EWrapper, EClient):
     def managedAccounts(self, accountsList: str):
         for account in accountsList.split(',')[:-1]:
             try:
-                new_account = acct_map[account]
+                new_account = account_map[account]
                 active_portfolio = new_account.active_portfolio
                 if not active_portfolio:
                     active_portfolio = Portfolio()
@@ -107,31 +111,29 @@ class IBapi(EWrapper, EClient):
                 setattr(new_account, 'active_portfolio', active_portfolio)
                 self.accounts[account] = new_account
             except KeyError as ke:
-                print(f"Account {account} does not exist in database. Please format the new account now.")
+                logger.info(f"Account {account} does not exist in database. Please format the new account now.")
                 try:
                     new_account = Account()
-                    print(f"New Account Found: {account}")
+                    logger.warning(f"New Account Found: {account}")
                     for c in client_map.values():
                         print(f"[{c.id}] - {c.client}")
                     new_account.client_id = int(
                         input("Please select a client id number from the list above:\n\t> "))
-                    print("Stored new account's client:", 
-                          client_map[new_account.client_id])
+                    logger.warning(f"Stored new account's client: {client_map[new_account.client_id]}")
                     for t in account_type_map.values():
                         print(f"[{t.id}] - {t.type_name}: {t.description}")
                     new_account.type_id = int(
                         input("Please select an account type id number from the list above:\n\t"))
-                    print("Stored new account's type:", 
-                          account_type_map[new_account.type_id])
+                    logger.warning(f"Stored new account's type: {account_type_map[new_account.type_id]}")
                     new_account.alias = ""
                     while new_account.alias == "":
                         new_account.alias = input(f"\nPlease insert an alias for the new account:\n> ")
                     session.add(new_account)
                     session.commit()
                 except:
-                    print("Formatting of new account failed. Please format in database and restart application.")
+                    logger.error("Formatting of new account failed. Please format in database and restart application.")
                     continue
-            print(f"Account: {account} formatted")
+            logger.info(f"Account: {account} formatted")
 
 
     def accountSummary(self, reqId:str, account:str, tag:str, value:str, 
@@ -162,17 +164,17 @@ class IBapi(EWrapper, EClient):
         https://interactivebrokers.github.io/tws-api/interfaceIBApi_1_1EWrapper.html#acd761f48771f61dd0fb9e9a7d88d4f04
         """
         # TODO Convert print to logger.
-        print(f"Account: {account} \n\tTag: {tag} \n\tValue: {value} \n\tCurrency:{currency}")
+        logger.info(f"Account: {account} \n\tTag: {tag} \n\tValue: {value} \n\tCurrency:{currency}")
 
         setattr(self.accounts[account], 'total_cash_value', value)
         setattr(self.accounts[account].active_portfolio, 'cash', float(value))
         self.session.add(self.accounts[account].active_portfolio)
         self.session.commit()
-        print(f"Updated total cash value for account {account} - portfolio id: {self.accounts[account].active_portfolio.id}.")
+        logger.info(f"Updated total cash value for account {account} - portfolio id: {self.accounts[account].active_portfolio.id}.")
 
 
     def accountSummaryEnd(self, reqId=9000):
-        print("Account Summary End.")
+        logger.info("Account Summary End.")
 
     def position(self, account: str, contract: Contract, position: float,
                        avgCost: float):
@@ -193,7 +195,7 @@ class IBapi(EWrapper, EClient):
         avgCost : float
             average cost of the position (not used in this function)
         """
-        print("Position.", "Account:", account, "Symbol:", contract.symbol, 
+        logger.info("Position.", "Account:", account, "Symbol:", contract.symbol, 
               "SecType:", contract.secType, "Currency:", contract.currency, 
               "Position:", position, "Avg cost:", avgCost)
 
@@ -202,7 +204,7 @@ class IBapi(EWrapper, EClient):
         try:
             new_position.asset_id = a_map[contract.symbol].id
         except KeyError as ke:
-            print(f'Asset "{contract.symbol}" not found. Adding new asset to database.')
+            logger.warning(f'Asset "{contract.symbol}" not found. Adding new asset to database.')
             new_asset = Asset()
             new_asset.asset = contract.symbol
             session.add(new_asset)
@@ -216,7 +218,7 @@ class IBapi(EWrapper, EClient):
         self.accounts[account].current_positions[contract.symbol] = new_position
 
         if self.initialized:
-            print("App initialized. Running position end procedure.")
+            logger.info("App initialized. Running position end procedure.")
             self.position_end_procedure()
 
     def create_new_portfolio(self, account: Account):
@@ -242,7 +244,7 @@ class IBapi(EWrapper, EClient):
             return
         sheet_id='1-r81lqrVvAZxHWRX6n2sSI8im_Be6xA0iCU9YB0LkAg'
         sheet_name='Positions'
-        positions = all_query(CurrentPosition)
+        positions = filter(lambda p: p.active, all_query(Position))
         data = collection_to_dataframe(positions).reset_index()[['asset',
                                                 'alias',
                                                 'account_id',
@@ -250,7 +252,7 @@ class IBapi(EWrapper, EClient):
                                                 'quantity',
                                                 'date',
                                                 'cash']]
-        print(data.dtypes)
+        logger.info(data.dtypes)
         if self.debug:
             return
         update_sheet(sheet_id=sheet_id, 
@@ -258,7 +260,7 @@ class IBapi(EWrapper, EClient):
                      data_object=data)
 
     def position_end_procedure(self):
-        print("Starting positionEnd.")
+        logger.info("Starting positionEnd.")
         for a, account in self.accounts.items():
             for position in account.current_positions.values():
                 position_mask = lambda p: (position.asset_id == p.asset_id) & \
@@ -268,32 +270,32 @@ class IBapi(EWrapper, EClient):
                                                      .positions_collection \
                                    if position_mask(p)), None)
                 if db_position:
-                    print(f"Matching position for {account.account} - {db_position.assets.asset} - {db_position.quantity}")
+                    logger.info(f"Matching position for {account.account} - {db_position.assets.asset} - {db_position.quantity}")
                 else:
-                    print(f"New position. Formatting new portfolio for account {account.account}.")
+                    logger.info(f"New position. Formatting new portfolio for account {account.account}.")
                     new_portfolio = self.create_new_portfolio(account)
-                    print("Sleeping to allow update.")
+                    logger.info("Sleeping to allow update.")
                     time.sleep(30)
                     break
         print("Pushing current positions to google sheet: https://docs.google.com/spreadsheets/d/1-r81lqrVvAZxHWRX6n2sSI8im_Be6xA0iCU9YB0LkAg/edit?pli=1#gid=1803566426")
         self.push_current_positions()
-        print("PositionEnd")
+        logger.info("PositionEnd")
 
     def positionEnd(self):
         self.position_end_procedure()
 
     def completedOrder(self, contract:Contract, order:Order, 
                              order_state:OrderState):
-        print(contract.symbol,'\n\t','Order:', order,'\n\t', 'OrderState:', order_state.completedTime)
+        logger.info(f"{contract.symbol} \n\tOrder: {order} \n\tOrderState:{order_state.completedTime}")
 
     def exec_details_end_procedure(self):
-        print("Starting execDetailsEnd.")
+        logger.info("Starting execDetailsEnd.")
         print("Pushing updated Trade Log to google sheet: https://docs.google.com/spreadsheets/d/1-r81lqrVvAZxHWRX6n2sSI8im_Be6xA0iCU9YB0LkAg/edit?pli=1#gid=1011548667")
         self.push_updated_trade_log()
-        print("ExecDetailsEnd")
+        logger.info("ExecDetailsEnd")
 
     def execDetails(self, reqId: int, contract: Contract, execution: Execution):
-        print("ExecutionId:", execution.execId, "ReqId:", reqId, "Symbol:", contract.symbol, "SecType:", contract.secType, "Time:",execution.time, "AccountNumber:", execution.acctNumber, "Side:", execution.side, "Shares:", execution.shares, "Price:", execution.price, "TotalShares:", execution.cumQty, "AvgPrice:", execution.avgPrice)
+        logger.info("ExecutionId:", execution.execId, "ReqId:", reqId, "Symbol:", contract.symbol, "SecType:", contract.secType, "Time:",execution.time, "AccountNumber:", execution.acctNumber, "Side:", execution.side, "Shares:", execution.shares, "Price:", execution.price, "TotalShares:", execution.cumQty, "AvgPrice:", execution.avgPrice)
 
         account = self.accounts[execution.acctNumber]
 
@@ -301,7 +303,7 @@ class IBapi(EWrapper, EClient):
                         t.account_id==account.id) & (
                         t.ref_id == execution.execId), 
                       account.trade_history_collection)):
-            print("Trade already logged:", execution.execId)
+            logger.info("Trade already logged:", execution.execId)
             return
         trade = TradeHistory()
         trade.account_id = account.id
@@ -317,7 +319,7 @@ class IBapi(EWrapper, EClient):
         if execution.side == 'BOT':
             trade.sold = False
 
-        print(trade.__dict__)
+        logger.info(trade.__dict__)
         self.session.add(trade)
         self.session.commit()
 
@@ -329,7 +331,7 @@ class IBapi(EWrapper, EClient):
                         marketPrice: float, marketValue: float,
                         averageCost: float, unrealizedPNL: float,
                         realizedPNL: float, accountName: str):
-        print("UpdatePortfolio.", "Symbol:", contract.symbol, "SecType:", 
+        logger.info("UpdatePortfolio.", "Symbol:", contract.symbol, "SecType:", 
               contract.secType, "Exchange:", contract.exchange, "Position:", 
               position, "MarketPrice:", marketPrice, "MarketValue:", marketValue, 
               "AverageCost:", averageCost, "UnrealizedPNL:", unrealizedPNL, 
@@ -338,17 +340,17 @@ class IBapi(EWrapper, EClient):
     def updateAccountValue(self, key: str, val: str, currency: str,
                                  accountName: str):
         if key == 'CashBalance':
-            print("UpdateAccountValue. Key:", key, "Value:", val,
+            logger.info("UpdateAccountValue. Key:", key, "Value:", val,
                 "Currency:", currency, "AccountName:", accountName)
 
     def updateAccountTime(self, timeStamp: str):
-        print("UpdateAccountTime. Time:", timeStamp)
+        logger.info("UpdateAccountTime. Time:", timeStamp)
 
     def commissionReport(self, commissionReport: CommissionReport):
-        print("CommissionReport.", commissionReport)
+        logger.info("CommissionReport.", commissionReport)
 
     def execDetailsEnd(self, reqId: int):
-        print("ExecDetailsEnd. ReqId:", reqId)
+        logger.info("ExecDetailsEnd. ReqId:", reqId)
         self.exec_details_end_procedure()
 
 def run_ibkr(port: int = 7496, disconnect: bool = False, debug: bool = False):
@@ -367,23 +369,23 @@ def run_ibkr(port: int = 7496, disconnect: bool = False, debug: bool = False):
     #################
 
     #Start the socket in a thread
-    print("Starting thread.")
+    logger.info("Starting thread.")
     api_thread = threading.Thread(target=app.run, daemon=True)
     api_thread.start()
 
     time.sleep(10) # Sleep interval to allow time for incoming price data
     if app.isConnected():
-        print("Requesting account summary", f"Connection: {app.isConnected()}")
+        logger.info(f"Requesting account summary Connection: {app.isConnected()}")
         app.reqAccountSummary(groupName='All', 
                                 tags=AccountSummaryTags.TotalCashValue,
                                 reqId=9000)
         time.sleep(10)
 
-        print("requesting positions data.")
+        logger.info("requesting positions data.")
         app.reqPositions()
         time.sleep(10)
 
-        print("requesting executions data.")
+        logger.info("requesting executions data.")
         execution_filter = ExecutionFilter()
         app.reqExecutions(reqId=9000, execFilter=execution_filter)
         time.sleep(10)

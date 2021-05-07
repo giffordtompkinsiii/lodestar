@@ -29,10 +29,11 @@ from sqlalchemy.ext.automap import automap_base
 
 tables = ['accounts',
             'account_types',
-            'api',
+            'apis',
             'assets',
             'cash_balance_history',
             'clients',
+            'positions',
             'price_history',
             'tidemarks',
             'tidemark_history',
@@ -83,6 +84,7 @@ Api = Base.classes.apis
 Asset = Base.classes.assets
 CashBalance = Base.classes.cash_balance_history
 Client = Base.classes.clients
+Position = Base.classes.positions
 PriceHistory = Base.classes.price_history
 TidemarkHistory = Base.classes.tidemark_history
 TidemarkDaily = Base.classes.tidemark_history_daily
