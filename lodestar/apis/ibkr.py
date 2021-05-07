@@ -5,7 +5,15 @@ or Web Portal and redefines methods therein to work for this program.
 
 Classes
 -------
-IbkrAccount
+IBapi(EWrapper, EClient):
+    The IBKR App object
+
+Methods
+-------
+str_to_timestamp(datetime_str:str) -> dt.datetime:
+    Convert IBKR date strings to datetime objects.
+
+
 
 References
 ----------
@@ -52,6 +60,7 @@ asset_map = {a.asset: a for a in asset_map.values()}
 api_map = {a.api: a for a in api_map.values()}
 
 def str_to_timestamp(datetime_str:str)->dt.datetime:
+    """Convert IBKR date strings to datetime objects."""
     date_str, time_str = datetime_str.split('  ')
     date_obj = dt.date(year=int(date_str[0:4]),
                    month=int(date_str[4:6]),
@@ -76,12 +85,35 @@ class IBapi(EWrapper, EClient):
 
     Methods
     -------
+    accountSummary(reqId:str, account:str, tag:str, value:str, currency:str):
+        Updates the TotalCashValue from the account.
+    accountSummaryEnd(reqId=9000):
+        Notifies when all the accounts' information has been received.
+    # TODO: Remove Portfolio() references
+    create_new_portfolio(account: Account):
+        # REMOVE Portfolio() Reference
+    execDetails(reqId: int, contract: Contract, execution: Execution):
+        Provides the executions which happened in the last 24 hours.
+    execDetailsEnd(reqId: int):
+        Indicates the end of the Execution reception.
     managedAccounts(accountsList:str):
         Receives a comma-separated string with the managed account ids.
     position(account:str, contract:Contract, position:float, avgCost:float):
         Provides the portfolio's open positions.
-    accountSummary(reqId:str, account:str, tag:str, value:str, currency:str):
-        Updates the TotalCashValue from the account.
+    positionEnd():
+        Indicates all the positions have been transmitted.
+    push_current_positions():
+        Pushes current positions report to gSheet.
+    push_updated_trade_log():
+        Calls push_trade_report.
+    updatePortfolio(contract: Contract, position: float, marketPrice: float, 
+                    marketValue: float, averageCost: float, unrealizedPNL: float, 
+                    realizedPNL: float, accountName: str):
+        Receives the subscribed account's portfolio. 
+    updateAccountTime(timeStamp: str):
+        Receives the last time on which the account was updated.
+    updateAccountValue(key: str, val: str, currency: str, accountName: str):
+        Receives the subscribed account's information. 
     """
 
     def __init__(self):
@@ -92,15 +124,20 @@ class IBapi(EWrapper, EClient):
         self.initialized = False
         self.debug = False
         self.closing_processed = False
+        self.latest_update = None
 
     def check_close(self):
+        """Check if market is closed or if IBKR.closing procedures have already run."""
         utc_today = dt.datetime.utcnow()
         closed = (utc_today + dt.timedelta(hours=3)).date() != utc_today
-
         return closed and self.closing_processed
 
 
     def managedAccounts(self, accountsList: str):
+        """Receives a comma-separated string with the managed account ids. 
+        
+        Occurs automatically on initial API client connection.
+        """
         for account_name in accountsList.split(',')[:-1]:
             try:
                 account = account_map[account_name]
@@ -172,6 +209,7 @@ class IBapi(EWrapper, EClient):
 
 
     def accountSummaryEnd(self, reqId=9000):
+        """Notifies when all the accounts' information has been received."""
         logger.info("Account Summary End.")
 
     def position(self, account: str, contract: Contract, position: float,
@@ -217,7 +255,7 @@ class IBapi(EWrapper, EClient):
 
         if self.initialized:
             logger.info("App initialized. Running position end procedure.")
-            self.position_end_procedure()
+            self.positionEnd()
 
     def create_new_portfolio(self, account: Account):
         # REMOVE Portfolio() Reference
@@ -237,29 +275,16 @@ class IBapi(EWrapper, EClient):
         return new_portfolio
 
     def push_updated_trade_log(self):
+        """Calls push_trade_report."""
+        # TODO: probably don't need this.
         push_trade_report()
 
     def push_current_positions(self):
-        if self.debug:
-            return
-        sheet_id='1-r81lqrVvAZxHWRX6n2sSI8im_Be6xA0iCU9YB0LkAg'
-        sheet_name='Positions'
-        positions = filter(lambda p: p.active, all_query(Position))
-        data = collection_to_dataframe(positions).reset_index()[['asset',
-                                                'alias',
-                                                'account_id',
-                                                'avg_price',
-                                                'quantity',
-                                                'date',
-                                                'cash']]
-        logger.info(data.dtypes)
-        if self.debug:
-            return
-        update_sheet(sheet_id=sheet_id, 
-                     sheet_name=sheet_name, 
-                     data_object=data)
+        """Pushes current positions report to gSheet."""
 
-    def position_end_procedure(self):
+
+    def positionEnd(self):
+        """Indicates all the positions have been transmitted."""
         logger.info("Starting positionEnd.")
         for a, account in self.accounts.items():
             for position in account.current_positions.values():
@@ -282,20 +307,19 @@ class IBapi(EWrapper, EClient):
         self.push_current_positions()
         logger.info("PositionEnd")
 
-    def positionEnd(self):
-        self.position_end_procedure()
+    # def completedOrder(self, contract:Contract, order:Order, 
+    #                          order_state:OrderState):
+    #     logger.info(f"{contract.symbol} \n\tOrder: {order} \n\tOrderState:{order_state.completedTime}")
 
-    def completedOrder(self, contract:Contract, order:Order, 
-                             order_state:OrderState):
-        logger.info(f"{contract.symbol} \n\tOrder: {order} \n\tOrderState:{order_state.completedTime}")
-
-    def exec_details_end_procedure(self):
+    def execDetailsEnd(self, reqId: int):
+        """Indicates the end of the Execution reception."""
         logger.info("Starting execDetailsEnd.")
         print("Pushing updated Trade Log to google sheet: https://docs.google.com/spreadsheets/d/1-r81lqrVvAZxHWRX6n2sSI8im_Be6xA0iCU9YB0LkAg/edit?pli=1#gid=1011548667")
         self.push_updated_trade_log()
         logger.info("ExecDetailsEnd")
 
     def execDetails(self, reqId: int, contract: Contract, execution: Execution):
+        """Provides the executions which happened in the last 24 hours."""
         logger.info("ExecutionId:", execution.execId, "ReqId:", reqId, "Symbol:", contract.symbol, "SecType:", contract.secType, "Time:",execution.time, "AccountNumber:", execution.acctNumber, "Side:", execution.side, "Shares:", execution.shares, "Price:", execution.price, "TotalShares:", execution.cumQty, "AvgPrice:", execution.avgPrice)
 
         account = self.accounts[execution.acctNumber]
@@ -325,34 +349,36 @@ class IBapi(EWrapper, EClient):
         self.session.commit()
 
         if self.initialized:
-            self.exec_details_end_procedure()
-            pass
+            self.execDetailsEnd()
 
     def updatePortfolio(self, contract: Contract, position: float,
                         marketPrice: float, marketValue: float,
                         averageCost: float, unrealizedPNL: float,
                         realizedPNL: float, accountName: str):
+        """Receives the subscribed account's portfolio. 
+        
+        This function will receive only the portfolio of the subscribed account. If the portfolios of all managed accounts are needed, refer to EClientSocket::reqPosition After the initial callback to updatePortfolio, callbacks only occur for positions which have changed.
+        """
         logger.info("UpdatePortfolio.", "Symbol:", contract.symbol, "SecType:", 
               contract.secType, "Exchange:", contract.exchange, "Position:", 
               position, "MarketPrice:", marketPrice, "MarketValue:", marketValue, 
               "AverageCost:", averageCost, "UnrealizedPNL:", unrealizedPNL, 
               "RealizedPNL:", realizedPNL, "AccountName:", accountName)
 
-    def updateAccountValue(self, key: str, val: str, currency: str,
-                                 accountName: str):
+    def updateAccountValue(self, key: str, val: str, currency: str, 
+                        accountName: str):
+        """Receives the subscribed account's information. 
+        
+        Only one account can be subscribed at a time. After the initial callback to updateAccountValue, callbacks only occur for values which have changed. This occurs at the time of a position change, or every 3 minutes at most. This frequency cannot be adjusted.
+        """
         if key == 'CashBalance':
             logger.info("UpdateAccountValue. Key:", key, "Value:", val,
                 "Currency:", currency, "AccountName:", accountName)
 
-    def updateAccountTime(self, timeStamp: str):
-        logger.info("UpdateAccountTime. Time:", timeStamp)
-
-    def commissionReport(self, commissionReport: CommissionReport):
-        logger.info("CommissionReport.", commissionReport)
-
-    def execDetailsEnd(self, reqId: int):
-        logger.info("ExecDetailsEnd. ReqId:", reqId)
-        self.exec_details_end_procedure()
+    # def updateAccountTime(self, timeStamp: str):
+    #     "Receives the last time on which the account was updated."
+    #     logger.info("UpdateAccountTime. Time:", timeStamp)
+    #     self.latest_update.creation_date = str_to_timestamp(timeStamp)
 
 def run_ibkr(port: int = 7496, disconnect: bool = False, debug: bool = False):
     app = IBapi()
