@@ -37,7 +37,7 @@ from .. import logger
 from ..database.maps import (account_map, api_map, asset_map, 
                              client_map, account_type_map)
 from ..database.functions import all_query, collection_to_dataframe
-from ..database.models import (Account, Asset, Client, Position, 
+from ..database.models import (Account, Asset, CashBalance, Client, Position, 
                                TradeHistory, session)
 
 
@@ -101,15 +101,12 @@ class IBapi(EWrapper, EClient):
 
 
     def managedAccounts(self, accountsList: str):
-        for account in accountsList.split(',')[:-1]:
+        for account_name in accountsList.split(',')[:-1]:
             try:
-                new_account = account_map[account]
-                active_portfolio = new_account.active_portfolio
-                if not active_portfolio:
-                    active_portfolio = Portfolio()
-                setattr(new_account, 'current_positions', {})
-                setattr(new_account, 'active_portfolio', active_portfolio)
-                self.accounts[account] = new_account
+                account = account_map[account_name]
+                current_positions = account.active_positions
+
+                self.accounts[account_name] = account
             except KeyError as ke:
                 logger.info(f"Account {account} does not exist in database. Please format the new account now.")
                 try:
@@ -133,7 +130,7 @@ class IBapi(EWrapper, EClient):
                 except:
                     logger.error("Formatting of new account failed. Please format in database and restart application.")
                     continue
-            logger.info(f"Account: {account} formatted")
+            logger.info(f"Account: {account_name} formatted")
 
 
     def accountSummary(self, reqId:str, account:str, tag:str, value:str, 
@@ -163,14 +160,15 @@ class IBapi(EWrapper, EClient):
         See TWS API Reference:
         https://interactivebrokers.github.io/tws-api/interfaceIBApi_1_1EWrapper.html#acd761f48771f61dd0fb9e9a7d88d4f04
         """
-        # TODO Convert print to logger.
         logger.info(f"Account: {account} \n\tTag: {tag} \n\tValue: {value} \n\tCurrency:{currency}")
-
-        setattr(self.accounts[account], 'total_cash_value', value)
-        setattr(self.accounts[account].active_portfolio, 'cash', float(value))
-        self.session.add(self.accounts[account].active_portfolio)
+        account = self.accounts[account]
+        # CashBalance(account_id=account.id, cash_timestamp=, cash_balance=value, ) 
+        # session.add(CashBalance)
+        # session.commit()
+        # setattr(self.accounts[account].active_portfolio, 'cash', float(value))
         self.session.commit()
-        logger.info(f"Updated total cash value for account {account} - portfolio id: {self.accounts[account].active_portfolio.id}.")
+        logger.info(f"Updated total cash value for account {account} - portfolio # TODO: get rid of portfolio ref. 
+        id: {self.accounts[account].active_portfolio.id}.")
 
 
     def accountSummaryEnd(self, reqId=9000):
@@ -222,6 +220,7 @@ class IBapi(EWrapper, EClient):
             self.position_end_procedure()
 
     def create_new_portfolio(self, account: Account):
+        # REMOVE Portfolio() Reference
         new_portfolio = Portfolio()
         new_portfolio.account_id = account.id
         new_portfolio.active = True 
@@ -233,7 +232,8 @@ class IBapi(EWrapper, EClient):
 
         self.session.add_all(account.current_positions.values())
         self.session.commit()
-        account.active_portfolio = new_portfolio
+        # TODO: get rid of portfolio ref. 
+        # account.active_portfolio = new_portfolio
         return new_portfolio
 
     def push_updated_trade_log(self):
@@ -266,7 +266,8 @@ class IBapi(EWrapper, EClient):
                 position_mask = lambda p: (position.asset_id == p.asset_id) & \
                                     (position.quantity == p.quantity)
 
-                db_position = next((p for p in account.active_portfolio \
+                # TODO: get rid of portfolio ref. 
+                # db_position = next((p for p in account.active_portfolio \
                                                      .positions_collection \
                                    if position_mask(p)), None)
                 if db_position:

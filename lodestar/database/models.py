@@ -93,6 +93,7 @@ TidemarkType = Base.classes.tidemark_types
 TradeHistory = Base.classes.trade_history
 
 
+
 ## CUSTOM RELATIONSHIP DEFINITIONS
 with warnings.catch_warnings():
     warnings.simplefilter('ignore', sa_exc.SAWarning)
@@ -100,7 +101,10 @@ with warnings.catch_warnings():
                                 primaryjoin=(Asset.id==PriceHistory.asset_id),
                                 order_by=lambda: PriceHistory.date.desc(),
                                 uselist=False)
-
+    Account.active_positions = relationship(Position,
+                                primaryjoin=(
+                                    (Account.id==Position.account_id) & Position.active)
+    )
 # Instantiate a session for querying.
 Session = sessionmaker()
 session = Session(bind=engine, expire_on_commit=False)

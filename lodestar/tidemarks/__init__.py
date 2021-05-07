@@ -36,7 +36,6 @@ scores_pickle_path = os.path.join(data_file_dir, 'scores_all.pickle')
 pickle_path = os.path.join(data_file_dir, 'believability.pickle')
 
 
-tm_id_name_map = 
 tm_id_map = {i:tm.tidemark for i, tm in tidemark_map.items()}
 id_tm_map = {tm:i for i, tm in tm_id_map.items()}
 
