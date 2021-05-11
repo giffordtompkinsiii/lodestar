@@ -48,6 +48,17 @@ from ..database.functions import all_query, collection_to_dataframe
 from ..database.models import (Account, Asset, CashBalance, Client, Position, 
                                TradeHistory, session)
 
+# Account Summary Value Update Functions
+# Must have arguements: (account:Account, value:float)
+# Function to call determined by `tag`.
+def update_cash_value(account:Account, value):
+    logger.info(f"Updating {account} total cash value: {value}")
+    c = CashBalance(account_id=account.id, cash_balance=value)
+    account.pending_cash_balance = c
+    return c
+
+tag_func = {}
+tag_func['TotalCashValue'] = update_cash_value
 
 # from .reports import push_trade_report
 # TODO Move sheet update methods to reports module and import them here.
@@ -142,7 +153,8 @@ class IBapi(EWrapper, EClient):
             try:
                 account = account_map[account_name]
                 current_positions = account.active_positions
-
+                account.pending_trades = {}
+                account.pending_cash_balance = None
                 self.accounts[account_name] = account
             except KeyError as ke:
                 logger.info(f"Account {account} does not exist in database. Please format the new account now.")
@@ -171,7 +183,7 @@ class IBapi(EWrapper, EClient):
 
 
     def accountSummary(self, reqId:str, account:str, tag:str, value:str, 
-                             currency:str):
+                        currency:str):
         """Updates the TotalCashValue from the account.
         
             * TotalCashValue — Total cash balance recognized at the time of trade + futures PNL
@@ -197,15 +209,11 @@ class IBapi(EWrapper, EClient):
         See TWS API Reference:
         https://interactivebrokers.github.io/tws-api/interfaceIBApi_1_1EWrapper.html#acd761f48771f61dd0fb9e9a7d88d4f04
         """
+
+
         logger.info(f"Account: {account} \n\tTag: {tag} \n\tValue: {value} \n\tCurrency:{currency}")
         account = self.accounts[account]
-        # CashBalance(account_id=account.id, cash_timestamp=, cash_balance=value, ) 
-        # session.add(CashBalance)
-        # session.commit()
-        # setattr(self.accounts[account].active_portfolio, 'cash', float(value))
-        self.session.commit()
-        logger.info(f"Updated total cash value for account {account} - portfolio # TODO: get rid of portfolio ref. 
-        id: {self.accounts[account].active_portfolio.id}.")
+        new_object = tag_func[tag](account, value)
 
 
     def accountSummaryEnd(self, reqId=9000):
@@ -231,27 +239,35 @@ class IBapi(EWrapper, EClient):
         avgCost : float
             average cost of the position (not used in this function)
         """
-        logger.info("Position.", "Account:", account, "Symbol:", contract.symbol, 
-              "SecType:", contract.secType, "Currency:", contract.currency, 
-              "Position:", position, "Avg cost:", avgCost)
-
-        new_position = Position()
-        new_position.account_id = self.accounts[account].id  
-        try:
-            new_position.asset_id = a_map[contract.symbol].id
-        except KeyError as ke:
-            logger.warning(f'Asset "{contract.symbol}" not found. Adding new asset to database.')
-            new_asset = Asset()
-            new_asset.asset = contract.symbol
-            session.add(new_asset)
-            session.commit()
-            session.refresh(new_asset)
-            a_map[contract.symbol] = new_asset
-            new_position.asset_id = new_asset.id
-        new_position.quantity = position
-        new_position.avg_price = avgCost
-        new_position.last_modified = dt.datetime.now()
-        self.accounts[account].current_positions[contract.symbol] = new_position
+        logger.info(f"Position Details -- Account: {account}, "
+                    + f"Symbol: {contract.symbol}, SecType: {contract.secType}, "
+                    + f"Currency: {contract.currency}, Position: {position}, "
+                    + f"Avg cost: {avgCost}")
+        
+        # Pull pending trade by asset_name
+        p = self.accounts[account].pending_trades.get(contract.Symbol, None) 
+        if p:
+            p.position = position
+            logger.info(f"Setting {account} {Contract.symbol} position to "
+                            + f"{p.position}")
+            self.accountSummary()
+        # new_position = Position()
+        # new_position.account_id = self.accounts[account].id  
+        # try:
+        #     new_position.asset_id = a_map[contract.symbol].id
+        # except KeyError as ke:
+        #     logger.warning(f'Asset "{contract.symbol}" not found. Adding new asset to database.')
+        #     new_asset = Asset()
+        #     new_asset.asset = contract.symbol
+        #     session.add(new_asset)
+        #     session.commit()
+        #     session.refresh(new_asset)
+        #     a_map[contract.symbol] = new_asset
+        #     new_position.asset_id = new_asset.id
+        # new_position.quantity = position
+        # new_position.avg_price = avgCost
+        # new_position.last_modified = dt.datetime.now()
+        # self.accounts[account].current_positions[contract.symbol] = new_position
 
         if self.initialized:
             logger.info("App initialized. Running position end procedure.")
@@ -279,8 +295,8 @@ class IBapi(EWrapper, EClient):
         # TODO: probably don't need this.
         push_trade_report()
 
-    def push_current_positions(self):
-        """Pushes current positions report to gSheet."""
+    # def push_current_positions(self):
+    #     """Pushes current positions report to gSheet."""
 
 
     def positionEnd(self):
@@ -293,8 +309,8 @@ class IBapi(EWrapper, EClient):
 
                 # TODO: get rid of portfolio ref. 
                 # db_position = next((p for p in account.active_portfolio \
-                                                     .positions_collection \
-                                   if position_mask(p)), None)
+                                                    #  .positions_collection \
+                                #    if position_mask(p)), None)
                 if db_position:
                     logger.info(f"Matching position for {account.account} - {db_position.assets.asset} - {db_position.quantity}")
                 else:
@@ -307,10 +323,6 @@ class IBapi(EWrapper, EClient):
         self.push_current_positions()
         logger.info("PositionEnd")
 
-    # def completedOrder(self, contract:Contract, order:Order, 
-    #                          order_state:OrderState):
-    #     logger.info(f"{contract.symbol} \n\tOrder: {order} \n\tOrderState:{order_state.completedTime}")
-
     def execDetailsEnd(self, reqId: int):
         """Indicates the end of the Execution reception."""
         logger.info("Starting execDetailsEnd.")
@@ -320,34 +332,32 @@ class IBapi(EWrapper, EClient):
 
     def execDetails(self, reqId: int, contract: Contract, execution: Execution):
         """Provides the executions which happened in the last 24 hours."""
-        logger.info("ExecutionId:", execution.execId, "ReqId:", reqId, "Symbol:", contract.symbol, "SecType:", contract.secType, "Time:",execution.time, "AccountNumber:", execution.acctNumber, "Side:", execution.side, "Shares:", execution.shares, "Price:", execution.price, "TotalShares:", execution.cumQty, "AvgPrice:", execution.avgPrice)
-
+        logger.info(f"ExecutionId: {execution.execId}, ReqId: {reqId}, " 
+            + f"Symbol: {contract.symbol}, SecType:, {contract.secType}, "
+            + f"Time: {execution.time}, AccountNumber: {execution.acctNumber}, "
+            + f"Side: {execution.side}, Shares: {execution.shares}, "
+            + f"Price: {execution.price}, TotalShares: {execution.cumQty}, "
+            + f"AvgPrice: {execution.avgPrice}")
+            
         account = self.accounts[execution.acctNumber]
 
         if any(filter(lambda t: (
                         t.account_id==account.id) & (
-                        t.ref_id == execution.execId), 
+                        t.ref_id==execution.execId), 
                       account.trade_history_collection)):
-            logger.info("Trade already logged:", execution.execId)
+            logger.info("Trade already logged: {execution.execId}")
             return
         trade = TradeHistory()
         trade.account_id = account.id
         trade.asset_id = a_map[contract.symbol].id
         trade.api_id = api_map['ibkr'].id
-        trade.ref_id = execution.execId # .rsplit('.', maxsplit=1) # Corrections are denoted by id's differing only by the digits after the final period.
-        trade.shares = int(execution.shares)
+        trade.ref_id = execution.permId # .rsplit('.', maxsplit=1) # Corrections are denoted by id's differing only by the digits after the final period.
+        trade.quantity = (-1 + 2 * int(execution.side=='BOT')) * int(execution.shares)
         trade.price = float(execution.price)
-        trade.cumulative_shares = int(execution.cumQty)
-        trade.avg_price = float(execution.avgPrice)
-        trade.total_cash = self.accounts[execution.acctNumber].total_cash_value
-        trade.timestamp = str_to_timestamp(execution.time)
-        if execution.side == 'BOT':
-            trade.sold = False
+        trade.trade_timestamp = str_to_timestamp(execution.time)
 
-        logger.info(trade.__dict__)
-        self.session.add(trade)
-        self.session.commit()
-
+        account.pending_trades[contract.symbol] = trade
+        
         if self.initialized:
             self.execDetailsEnd()
 
