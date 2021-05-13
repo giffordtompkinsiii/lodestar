@@ -35,8 +35,9 @@ from . import logger
 from .database.models import Asset, BuoyHistory, PriceHistory, session
 from .database.functions import (add_new_objects, all_query, 
                                  update_database_object, collection_to_dataframe)
+setattr()
 
-class PricePipeline():
+class PricePipeline(Asset):
     td = dt.date.today()
     end_of_day = (dt.datetime.utcnow() + dt.timedelta(hours=3)).date()
     date_20y_ago = pd.to_datetime(dt.date(td.year - 20, td.month, td.day))
@@ -45,113 +46,113 @@ class PricePipeline():
     logger.info(f"20 years ago: {date_20y_ago}")
 
     def __init__(self, asset:Asset):
-# assets = all_query(Asset)
+        self.asset = asset
+        self.last_date = self.get_last_date()
 
-def get_prices(asset: Asset, last_date: dt.date = None, 
-                             debug:bool = False) -> pd.DataFrame:
-    """Pull prices from Yahoo!Finance for given `database.models.Asset`.
-    
-    Returns
-    -------
-    pandas.DataFrame: (asset_id, date, price)
-        DataFrame of asset's price history.
-    """
-    if hasattr(asset.current_price, 'date'):
-        last_date = pd.to_datetime(asset.current_price.date) or date_20y_ago
-    else:
-        last_date = date_20y_ago
+    def get_last_date(self):
+        """Get last price record from the database."""
+        current_price = self.asset.current_price
+        if hasattr(current_price, 'date'):
+            last_date = pd.to_datetime(current_price.date) or date_20y_ago
+        else:
+            last_date = date_20y_ago
+        logger.info(f"{asset.asset} last date: {self.last_date}")
 
-    logger.info(f"{asset.asset} last date: {last_date}")
+    def get_prices(self, debug:bool = False) -> pd.DataFrame:
+        """Pull prices from Yahoo!Finance for given `database.models.Asset`.
+        
+        Returns
+        -------
+        pandas.DataFrame: (asset_id, date, price)
+            DataFrame of asset's price history.
+        """
 
-    history = yf.Ticker(asset.asset.replace(' ','-')) \
-                .history(start=last_date,
-                         end=end_of_day, 
-                         # 9PM is closing time in UTC
-                         debug=debug)
-    history = history[history.index > last_date]
-    logger.info(
-        f"{asset.asset} price records since last date: {history.shape[0]}")
+        history = yf.Ticker(self.asset.asset.replace(' ','-')) \
+                    .history(start=self.last_date,
+                            end=end_of_day, 
+                            # 9PM is closing time in UTC
+                            debug=debug)
+        history = history[history.index > self.last_date]
+        logger.info(f"{self.asset.asset} price records since last date: "
+                    + f"{history.shape[0]}")
 
-    if not asset.price_history_collection and history.empty:
-        info.warning(f"No yfinance records or database records for {asset.asset}")
-        return pd.DataFrame()
-    
-    logger.info("Sleeping for yFinance API.")
-    time.sleep(1)
-    import_df = history.reset_index()[['Date','Close']] \
-                       .rename(columns={'Date':'date','Close':'price'})
-    import_df['asset_id'] = asset.id
+        if not asset.price_history_collection and history.empty:
+            logger.warning(f"No yfinance records or database records for "
+                            + f"{self.asset.asset}")
+            return pd.DataFrame()
+        
+        logger.info("Sleeping for yFinance API.")
+        time.sleep(1)
 
-    return import_df.set_index(['asset_id','date'])
+        import_df = history.reset_index()[['Date','Close']] \
+                        .rename(columns={'Date':'date','Close':'price'})
 
-def run_buoy_history(asset, audit:bool = False):
-    """Run buoy history for new prices."""
-    try:
-        last_run = pd.to_datetime(sorted(asset.new_prices, key=lambda p: p.date)[0].date)
-    except:
-        last_run = dt.date.today()
-    date_20y_ago = pd.to_datetime(dt.date(year=last_run.year - 20, 
-                                          month=last_run.month, 
-                                          day=last_run.day))
+        import_df['asset_id'] = self.asset.id
 
-    prices = list(filter(lambda p:p.date>=date_20y_ago,
-                             asset.price_history_collection))
+        return import_df.set_index(['asset_id','date'])
 
-    p_index = collection_to_dataframe(prices).reset_index('asset_id')
-    price_df = p_index.price
-    if not audit:
-        p_index = p_index[p_index.id.isin([p.id for p in asset.new_prices])]
-        if p_index.empty:
-            pass
-    else:
-        b_history  = session.query(BuoyHistory) \
-                            .filter(BuoyHistory.price_id.in_(
-                                [p.id for p in asset.price_history_collection])
-                    ).all()
-        # p_index = p_index[p_index.id.isin([p.id for p in b_history])]
+    def run_buoy_history(self, audit:bool = False):
+        """Run buoy history for new prices."""
+        last_run = self.last_date
 
+        prices = list(filter(lambda p:p.date>=date_20y_ago,
+                                self.asset.price_history_collection))
 
-    buoy_df = pd.DataFrame({
-        interval: price_df.pct_change(periods=interval, freq=pd.offsets.BDay()) \
-                          .rename(interval) for interval in [1, 5, 21, 126, 252]})
-
-    buoy_df = buoy_df.rename_axis('day_mvmt', axis=1).fillna(method='ffill')
-
-    pop = pd.DataFrame(index=buoy_df.stack().index)
-    drop = pd.DataFrame(index=buoy_df.stack().index)
-
-    for window, days in [('mo_01', 21), ('mo_06', 126), ('yr_01', 252), 
-                         ('yr_05', 252*5), ('yr_10', 252*10), ('yr_20', 252*20)]:
-        pop[window] = buoy_df.rolling(window=days, min_periods=1) \
-                             .max().stack().rename(window)
-        drop[window] = buoy_df.rolling(window=days, min_periods=1) \
-                              .min().stack().rename(window)
-    pop['pop'] = True
-    drop['pop'] = False
-    buoys = pd.concat([pop,drop])
-    buoys = buoys.join(p_index.id, on='date') \
-                 .rename(columns={'id':'price_id'})
-    buoy_objects = [BuoyHistory(**b._asdict()) \
-                    for b in buoys.itertuples(index=False)]
-    session.add_all(buoy_objects)
-    session.commit()
-    # TODO: Make sure all buoy History columns are present.
-    return buoy_objects
+        p_index = collection_to_dataframe(prices).reset_index('asset_id')
+        price_df = p_index.price
+        if not audit:
+            p_index = p_index[p_index.id.isin([p.id for p in asset.new_prices])]
+            if p_index.empty:
+                pass
+        else:
+            b_history  = session.query(BuoyHistory) \
+                                .filter(BuoyHistory.price_id.in_(
+                                    [p.id for p in asset.price_history_collection])
+                        ).all()
+            # p_index = p_index[p_index.id.isin([p.id for p in b_history])]
 
 
-def run_prices(asset: Asset, audit: bool = False) -> List[PriceHistory]:
-    """Create and export new PriceHistory objects."""
-    prices = get_prices(asset).reset_index().itertuples(index=False)
-    asset.new_prices = [PriceHistory(**p._asdict()) for p in prices]
-    # for p in asset.new_prices:
-    #     logger.debug(f"{p.date}")
-    session.add_all(asset.new_prices)
-    session.commit()
-    session.refresh(asset)
+        buoy_df = pd.DataFrame({
+            interval: price_df.pct_change(periods=interval, freq=pd.offsets.BDay()) \
+                            .rename(interval) for interval in [1, 5, 21, 126, 252]})
 
-    new_buoys = run_buoy_history(asset, audit)
-    logger.info(f"Inserted {len(buoy_objects)} records for {asset.asset} Buoy History.")
-    return asset.new_prices
+        buoy_df = buoy_df.rename_axis('day_mvmt', axis=1).fillna(method='ffill')
+
+        pop = pd.DataFrame(index=buoy_df.stack().index)
+        drop = pd.DataFrame(index=buoy_df.stack().index)
+
+        for window, days in [('mo_01', 21), ('mo_06', 126), ('yr_01', 252), 
+                            ('yr_05', 252*5), ('yr_10', 252*10), ('yr_20', 252*20)]:
+            pop[window] = buoy_df.rolling(window=days, min_periods=1) \
+                                .max().stack().rename(window)
+            drop[window] = buoy_df.rolling(window=days, min_periods=1) \
+                                .min().stack().rename(window)
+        pop['pop'] = True
+        drop['pop'] = False
+        buoys = pd.concat([pop,drop])
+        buoys = buoys.join(p_index.id, on='date') \
+                    .rename(columns={'id':'price_id'})
+        buoy_objects = [BuoyHistory(**b._asdict()) \
+                        for b in buoys.itertuples(index=False)]
+        session.add_all(buoy_objects)
+        session.commit()
+        # TODO: Make sure all buoy History columns are present.
+        return buoy_objects
+
+
+    def run_prices(asset: Asset, audit: bool = False) -> List[PriceHistory]:
+        """Create and export new PriceHistory objects."""
+        prices = get_prices(asset).reset_index().itertuples(index=False)
+        asset.new_prices = [PriceHistory(**p._asdict()) for p in prices]
+        # for p in asset.new_prices:
+        #     logger.debug(f"{p.date}")
+        session.add_all(asset.new_prices)
+        session.commit()
+        session.refresh(asset)
+
+        new_buoys = run_buoy_history(asset, audit)
+        logger.info(f"Inserted {len(buoy_objects)} records for {asset.asset} Buoy History.")
+        return asset.new_prices
 
 if __name__=='__main__':
     from .database.maps import asset_map
