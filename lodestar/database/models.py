@@ -28,6 +28,7 @@ from sqlalchemy.ext.automap import automap_base
 
 
 tables = ['assets',
+            'buoy_history',
             'price_history',
             'tidemarks',
             'tidemark_history',
@@ -72,6 +73,7 @@ with warnings.catch_warnings():
 
 ## TABLE DEFINITIONS
 Asset = Base.classes.assets
+BuoyHistory = Base.classes.buoy_history
 PriceHistory = Base.classes.price_history
 TidemarkHistory = Base.classes.tidemark_history
 TidemarkDaily = Base.classes.tidemark_history_daily

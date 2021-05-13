@@ -36,10 +36,10 @@ def update_old_data(asset: Asset):
     logger.info(f"{asset.id}-{asset.asset}: Deleting {q} records.")
     session.execute(q)
     session.commit()
-    return get_new_data(asset)
+    return get_new_data(asset, audit=True)
 
-def get_new_data(asset: Asset):
-    if run_prices(asset):
+def get_new_data(asset: Asset, audit: bool = False):
+    if run_prices(asset, audit):
         run_daily_tidemarks(asset)
         logger.debug(
             f"{asset.current_price.date}, {asset.current_price.believability}"
