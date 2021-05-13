@@ -107,10 +107,7 @@ def get_daily_tidemark_objects(price: PriceHistory) -> List[TidemarkDaily]:
     return price 
 
 def get_daily_scores(price: PriceHistory):
-    tm_history = session.query(TidemarkDaily) \
-                        .filter(TidemarkDaily.price_id.in_(
-                            [p.id for p in price.assets.price_history_collection])
-                        ).all()
+    tm_history = get_tm_history(price)
 
     price = get_daily_tidemark_objects(price)
 
@@ -134,6 +131,13 @@ def get_daily_scores(price: PriceHistory):
     session.refresh(price)
     price = get_believability(price)
     session.refresh(price.assets)
+
+def get_tm_history(price):
+    tm_history = session.query(TidemarkDaily) \
+                        .filter(TidemarkDaily.price_id.in_(
+                            [p.id for p in price.assets.price_history_collection])
+                        ).all()
+    return tm_history
 
 
 def run_daily_tidemark(price: PriceHistory):
