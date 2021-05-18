@@ -22,7 +22,7 @@ import warnings
 from . import engine, metadata, logger
 
 from sqlalchemy import (Boolean, Column, Date, DateTime, ForeignKey, Float, 
-                        Integer, Table, Text, UniqueConstraint, exc as sa_exc)
+                        Integer, Text, UniqueConstraint, exc as sa_exc)
 from sqlalchemy.orm import sessionmaker, relationship
 from sqlalchemy.ext.automap import automap_base
 

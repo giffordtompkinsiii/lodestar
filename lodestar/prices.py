@@ -17,9 +17,11 @@ get_prices(a: Asset)->pandas.DataFrame:
 update_prices(asset: Asset, debug: bool=True):
     Update database with records from .get_prices()
 """
+import numpy as np
 import argparse
 import pandas as pd
 import datetime as dt
+from sqlalchemy.util.langhelpers import methods_equivalent
 import yfinance as yf  
 import sys
 import time
@@ -38,12 +40,10 @@ from .database.functions import (add_new_objects, all_query,
 
 td = dt.date.today()
 end_of_day = (dt.datetime.utcnow() + dt.timedelta(hours=3)).date()
-date_20y_ago = pd.to_datetime(dt.date(td.year - 20, td.month, td.day))
+date_20y_ago = pd.to_datetime(dt.date(td.year - 21, td.month, td.day))
 
 logger.info(f"End of day: {end_of_day}")
 logger.info(f"20 years ago: {date_20y_ago}")
-
-# assets = all_query(Asset)
 
 def get_prices(asset: Asset, last_date: dt.date = None, 
                              debug:bool = False) -> pd.DataFrame:
@@ -82,13 +82,19 @@ def get_prices(asset: Asset, last_date: dt.date = None,
 
     return import_df.set_index(['asset_id','date'])
 
-def run_buoy_history(asset, audit:bool = False):
+def update_buoys(asset: Asset):
+    """Update missing buoy values."""
+    pass
+
+
+def get_new_buoys(asset, audit:bool = False):
     """Run buoy history for new prices."""
     try:
         last_run = pd.to_datetime(sorted(asset.new_prices, key=lambda p: p.date)[0].date)
     except:
         last_run = dt.date.today()
-    date_20y_ago = pd.to_datetime(dt.date(year=last_run.year - 20, 
+
+    date_20y_ago = pd.to_datetime(dt.date(year=last_run.year - 21, 
                                           month=last_run.month, 
                                           day=last_run.day))
 
@@ -97,16 +103,16 @@ def run_buoy_history(asset, audit:bool = False):
 
     p_index = collection_to_dataframe(prices).reset_index('asset_id')
     price_df = p_index.price
-    if not audit:
-        p_index = p_index[p_index.id.isin([p.id for p in asset.new_prices])]
-        if p_index.empty:
-            pass
-    else:
-        b_history  = session.query(BuoyHistory) \
-                            .filter(BuoyHistory.price_id.in_(
-                                [p.id for p in asset.price_history_collection])
-                    ).all()
-        # p_index = p_index[p_index.id.isin([p.id for p in b_history])]
+    # if not audit:
+    #     p_index = p_index[p_index.id.isin([p.id for p in asset.new_prices])]
+    #     if p_index.empty:
+    #         pass
+    # else:
+    #     b_history  = session.query(BuoyHistory) \
+    #                         .filter(BuoyHistory.price_id.in_(
+    #                             [p.id for p in asset.price_history_collection])
+    #                 ).all()
+    #     p_index = p_index[p_index.id.isin([p.id for p in b_history])]
 
 
     buoy_df = pd.DataFrame({
@@ -115,26 +121,45 @@ def run_buoy_history(asset, audit:bool = False):
 
     buoy_df = buoy_df.rename_axis('day_mvmt', axis=1).fillna(method='ffill')
 
-    pop = pd.DataFrame(index=buoy_df.stack().index)
-    drop = pd.DataFrame(index=buoy_df.stack().index)
+    high_marks = pd.DataFrame(index=buoy_df.stack().index)
+    low_marks = pd.DataFrame(index=buoy_df.stack().index)
 
-    for window, days in [('mo_01', 21), ('mo_06', 126), ('yr_01', 252), 
-                         ('yr_05', 252*5), ('yr_10', 252*10), ('yr_20', 252*20)]:
-        pop[window] = buoy_df.rolling(window=days, min_periods=1) \
+    per_cols = {'mo_01': 21, 
+                'mo_06': 126, 
+                'yr_01': 252, 
+                'yr_05': 252*5, 
+                'yr_10': 252*10, 
+                'yr_20': 252*20}
+    per_weights = [4,3,2,1,1,1]
+
+    for window, days in per_cols.items():
+        high_marks[window] = buoy_df.rolling(window=days, min_periods=days) \
                              .max().stack().rename(window)
-        drop[window] = buoy_df.rolling(window=days, min_periods=1) \
+        low_marks[window] = buoy_df.rolling(window=days, min_periods=days) \
                               .min().stack().rename(window)
-    pop['pop'] = True
-    drop['pop'] = False
-    buoys = pd.concat([pop,drop])
+    high_marks['high_mark'] = True
+    low_marks['high_mark'] = False
+    buoys = pd.concat([high_marks,low_marks])
     buoys = buoys.join(p_index.id, on='date') \
                  .rename(columns={'id':'price_id'})
-    buoy_objects = [BuoyHistory(**b._asdict()) \
-                    for b in buoys.itertuples(index=False)]
-    session.add_all(buoy_objects)
-    session.commit()
-    # TODO: Make sure all buoy History columns are present.
-    return buoy_objects
+    buoys = buoys.dropna(subset=per_cols, how='all')
+    ### TODO: This takes a second, so should be calculted after price_id has been 
+    # used to filter new buoys.
+    buoys['water_mark'] = buoys[per_cols].apply(
+                                lambda b: np.dot(per_weights, 
+                                                 b.replace(np.nan,0.0)) \
+                                            / np.sum(per_weights * ~b.isna()),
+                                axis=1)
+    buoys = buoys.reset_index('day_mvmt')
+    buoys.price_id = p_index.id
+
+    
+    # buoy_objects = [BuoyHistory(**b._asdict()) \
+    #                 for b in buoys.itertuples(index=False)]
+    # session.add_all(buoy_objects)
+    # session.commit()
+    # # TODO: Make sure all buoy History columns are present.
+    return buoys, p_index
 
 
 def run_prices(asset: Asset, audit: bool = False) -> List[PriceHistory]:
@@ -147,14 +172,19 @@ def run_prices(asset: Asset, audit: bool = False) -> List[PriceHistory]:
     session.commit()
     session.refresh(asset)
 
-    new_buoys = run_buoy_history(asset, audit)
-    logger.info(f"Inserted {len(buoy_objects)} records for {asset.asset} Buoy History.")
+    new_buoys = get_new_buoys(asset, audit)
+    logger.info(f"Inserted {len(new_buoys)} records for {asset.asset} Buoy History.")
     return asset.new_prices
 
 if __name__=='__main__':
     from .database.maps import asset_map
-    asset = asset_map[1]
-    new_buoys = run_buoy_history(asset, audit=True)
+    import time
+    t_0 = time.time()
+    for asset in list(asset_map.values())[0:2]:
+        buoys, p_index = get_new_buoys(asset, audit=True)
+        print(buoys.head(60))
+        print(p_index.head(60))
+        print((time.time() - t_0)/60, 'mins')
 
 
 
