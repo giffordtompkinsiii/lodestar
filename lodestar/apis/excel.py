@@ -1,3 +1,6 @@
+"""This script generates an excel spreadsheet for conducting the Bloomberg Pull.
+"""
+
 import os
 import time 
 import pandas as pd
@@ -9,7 +12,7 @@ from ..database.functions import all_query, collection_to_dataframe as to_df
 
 t_0 = time.time()
 bloombergs = all_query(Bloomberg)
-# Run this line in terminal containing the bloomberg pull xlsm.
+# Run this line in terminal containing `bloomberg_pull.xlsm`.
 # vba_extract.py macro_file.xlsm
 
 def to_excel_col(integer:int):

@@ -9,4 +9,4 @@ if __name__=='__main__':
     for i, asset in enumerate(asset_map.values()):
         update_old_data(asset)
         logger.debug(f"[{i+1}/{len(asset_map)}] {asset.asset} finished: {(time.time()) / 60} mins.")
-    
+
