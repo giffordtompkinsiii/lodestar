@@ -103,17 +103,6 @@ def get_new_buoys(asset, audit:bool = False):
 
     p_index = collection_to_dataframe(prices).reset_index('asset_id')
     price_df = p_index.price
-    # if not audit:
-    #     p_index = p_index[p_index.id.isin([p.id for p in asset.new_prices])]
-    #     if p_index.empty:
-    #         pass
-    # else:
-    #     b_history  = session.query(BuoyHistory) \
-    #                         .filter(BuoyHistory.price_id.in_(
-    #                             [p.id for p in asset.price_history_collection])
-    #                 ).all()
-    #     p_index = p_index[p_index.id.isin([p.id for p in b_history])]
-
 
     buoy_df = pd.DataFrame({
         interval: price_df.pct_change(periods=interval, freq=pd.offsets.BDay()) \
