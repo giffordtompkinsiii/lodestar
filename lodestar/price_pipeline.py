@@ -252,7 +252,7 @@ class BuoyPipeline(Pipeline):
         b = buoys[self.per_cols]
         num = b.apply(self.numer_func).sum(axis=1)
         denom = b.apply(self.denom_func).sum(axis=1)
-        buoys['water_mark'] = (num / denom).astype(float)
+        buoys['watermark'] = (num / denom).astype(float)
 
         buoys = buoys.reset_index('day_mvmt')
 
@@ -285,5 +285,7 @@ class DailyPipeline(Pipeline):
 
 if __name__=='__main__':
     t_0 = time.time()
-    asset = asset_map[1]
-
+    for a, asset in asset_map.items():
+        logger.info(f"{asset.id} - {asset} Running Daily Procedures.")
+        d = DailyPipeline(asset)
+        d.run_daily_procedures()

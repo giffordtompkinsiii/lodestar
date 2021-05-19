@@ -27,14 +27,21 @@ from sqlalchemy.orm import sessionmaker, relationship
 from sqlalchemy.ext.automap import automap_base
 
 
-tables = ['assets',
+tables = ['accounts',
+            'apis',
+            'assets',
+            'balance_history',
             'buoy_history',
+            'position_history',
             'price_history',
             'tidemarks',
             'tidemark_history',
             'tidemark_history_daily',
             'tidemark_terms',
-            'tidemark_types']
+            'tidemark_types',
+            'vw_believability',
+            'vw_high_watermarks',
+            'vw_low_watermarks']
 
 # Extract MetaData and create tables from them using AutoMap.
 with warnings.catch_warnings():
@@ -48,6 +55,31 @@ with warnings.catch_warnings():
 Base = automap_base(metadata=metadata)
 
 ## >>> INSERT VIEW DEFINITIONS HERE
+class CurrentBelievability(Base):
+    __tablename__='vw_believability'
+    __table_args__ = {'extend_existing': True}
+    asset_id = Column(Integer, ForeignKey('assets.id'), primary_key=True)
+    date = Column(Date, primary_key=True)
+    unique_constraint = UniqueConstraint(asset_id, date)
+
+class LowWatermark(Base):
+    __tablename__='vw_low_watermark'
+    __table_args__={'extend_existing': True}
+    asset_id = Column(Integer, ForeignKey('assets.id'), primary_key=True)
+    date = Column(Date, primary_key=True)
+    high_mark = Column(Boolean, primary_key=True)
+    day_mvmt = Column(Integer, primary_key=True)
+    unique_constraint = UniqueConstraint(asset_id, date, high_mark, day_mvmt)
+
+class HighWatermark(Base):
+    __tablename__='vw_high_watermark'
+    __table_args__={'extend_existing': True}
+    asset_id = Column(Integer, ForeignKey('assets.id'), primary_key=True)
+    date = Column(Date, primary_key=True)
+    high_mark = Column(Boolean, primary_key=True)
+    day_mvmt = Column(Integer, primary_key=True)
+    unique_constraint = UniqueConstraint(asset_id, date, high_mark, day_mvmt)
+
 def name_for_collection_relationship(base, local_cls, referred_cls, constraint):
     reflexive_names = {
         'tidemark_terms_term_id_fkey': 'tidemarks_collection',
@@ -72,12 +104,17 @@ with warnings.catch_warnings():
              name_for_collection_relationship=name_for_collection_relationship)
 
 ## TABLE DEFINITIONS
+Account = Base.classes.accounts
+Api = Base.classes.apis
 Asset = Base.classes.assets
+BalanceHistory = Base.classes.balance_history
 BuoyHistory = Base.classes.buoy_history
+PositionHistory = Base.classes.position_history
 PriceHistory = Base.classes.price_history
-TidemarkHistory = Base.classes.tidemark_history
-TidemarkDaily = Base.classes.tidemark_history_daily
 Tidemark = Base.classes.tidemarks
+TidemarkDaily = Base.classes.tidemark_history_daily
+TidemarkHistory = Base.classes.tidemark_history
+TidemarkTerm = Base.classes.tidemark_terms
 TidemarkType = Base.classes.tidemark_types
 
 ## CUSTOM RELATIONSHIP DEFINITIONS

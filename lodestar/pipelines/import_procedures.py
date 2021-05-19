@@ -157,6 +157,106 @@ def excel_import(workbook, process=0, cpu_count=1, start_asset=0, end_asset=-1,
                               disable_tidemark_pbar=disable_tidemark_pbar)
     return True
 
+class ExcelPipeline(object):
+
+    def __init__(self, filepath):
+        self.workbook = pd.read_excel(filepath, sheet_name=None, 
+                                      parse_dates=True, engine='openpyxl')
+        
+    def run_excel_import(self, process=0, cpu_count=1, start_asset=0, 
+                            end_asset=-1, test=False, disable_asset_pbar=False, 
+                            disable_tidemark_pbar=False):
+        for asset in tqdm(assets[start_asset + process : end_asset : cpu_count], 
+                          disable=disable_asset_pbar, position=3 * process,
+                          desc=f'Process {str(process + 1).zfill(2)} Assets'):
+            a = ExcelAsset(self.workbook, asset)
+            a.process_asset(process=process, 
+                            disable_tidemark_pbar=disable_tidemark_pbar)
+        return True
+            
+            
+        
+
+class ExcelAsset(ExcelPipeline):
+    def __init__(self, workbook, asset):
+        self.dataframe = workbook.get(asset, pd.DataFrame())
+        self.asset = asset
+
+    def _format_tidemarks(self):
+        """Format tidemarks for prep_tidemarks function"""    
+        df = self.dataframe
+        if df.empty \
+            or getattr(df.Dates, 'dtype', 
+                    np.dtype('O')) in [np.dtype('O'), np.dtype('float64')]:
+            logger.log(level=1, msg=f"No data for {asset.asset}.")
+            return pd.DataFrame()
+
+        # Set DatetimeIndex to quater-end dates
+        try:
+            df = df.set_index(df.Dates + pd.offsets.QuarterEnd(n=0)
+                                ).drop(columns='Dates')
+            df.index.name = 'date'
+        except TypeError as e:
+            logger.log(level=1, msg=f"{asset.asset} Type Error: {e}")
+            return pd.DataFrame()
+
+        # Stack dataframe
+        stack = df.melt(ignore_index=False)
+        stack['tidemark_id'] = stack.variable.map(tm_name_id_map)
+        stack = stack.dropna(subset=['tidemark_id'])
+        stack['asset_id'] = asset.id
+
+        return stack
+
+    def _process_tidemarks(self) -> Asset:
+        """Format dataframe and upload into database.
+
+        This function takes the stacked dataframe `stack` and filters it by 
+        `tidemark.id`. It then calls `update_database_object()` for the 
+        TidemarkHistory table and uploads the given `asset`
+        and `tidemark` combination.
+        """
+        a = self.asset
+        stack = self._format_tidemarks()
+        # This history is in database long-format
+        # (id, asset_id, date, tidemark_id, value, med_20y, std_20y, score)
+        tm_history = collection_to_dataframe(a.tidemark_history_collection)
+        tm_history = tm_history.reorder_levels(['asset_id','tidemark_id','date']) \
+                            .sort_index()
+
+        stack = stack.set_index(['tidemark_id','asset_id'], append=True) \
+                    .reorder_levels(['asset_id','tidemark_id','date']) \
+                    .sort_index()[['value']]
+        import_df = tm_history.combine_first(stack)
+
+        growth_tm = calculate_growth_tidemarks(a, import_df)
+        tidemarks = import_df.combine_first(growth_tm)
+
+        return get_tidemark_scores(tidemarks)
+
+    def process_asset(self, process=0, disable_tidemark_pbar=False):
+        """Convert dataframe values for given asset into a stack and process.
+
+        Finds the `asset`'s dataframe from the `workbook` and conveerts it into 
+        longform to pass into the `prep_tidemark()` function. It then calculates 
+        `TidemarkHistory.score`s and calls `prep_tidemark()` again.
+
+        Parameters
+        ----------
+        asset: Asset
+        workbook: dict(asset_name: pd.DataFrame)
+            A dictionary of asset keys and dataframes imported from an excel workbook.
+        process: int
+        disable_tidemark_pbar: bool
+
+        Returns
+        -------
+        None
+        """
+        import_df = self._process_tidemarks()
+        return import_df
+
+
 
 # def main():
 #     """To be run from the command line. Creates and utilizes the Argument Parser."""
@@ -222,15 +322,6 @@ def excel_import(workbook, process=0, cpu_count=1, start_asset=0, end_asset=-1,
 
 if __name__=='__main__':
     asset = asset_map[596]
-    filepath1 = '~/Downloads/7_APR_2021.xlsm'
-    workbook1 = pd.read_excel(filepath1, 
-                            sheet_name=None, 
-                            parse_dates=True, 
-                            engine='openpyxl')
-
-
-    import_df1 = process_asset(asset, workbook1)
-
     filepath = '~/Downloads/5_APR_2021.xlsm'
     workbook = pd.read_excel(filepath, 
                             sheet_name=None, 
