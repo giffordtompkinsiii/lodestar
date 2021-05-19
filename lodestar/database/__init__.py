@@ -13,12 +13,20 @@ functions
 """
 
 import os
-import warnings
-import subprocess
-from .. import logger
-from urllib import parse
-from sqlalchemy import create_engine, exc as sa_exc
+import numpy as np
+import psycopg2.extensions as psyco
+
+from sqlalchemy import create_engine
 from sqlalchemy.schema import MetaData
+
+from .. import logger
+
+def nan_to_null(f, _NULL=psyco.AsIs('NULL'), _Float=psyco.Float):
+    if not np.isnan(f):
+        return _Float(f)
+    return _NULL
+
+psyco.register_adapter(float, nan_to_null)
 
 home_dir = os.environ['HOME']
 psql_root_dir = os.path.join(home_dir,'.postgresql','lodestar')

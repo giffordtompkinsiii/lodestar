@@ -26,6 +26,26 @@ from psycopg2 import errors as psycopg_errors
 from . import logger
 from .models import session, Asset
 
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+def _db_objects_to_dict(db_objects):
+    return [{k:v for k,v in o.__dict__.items() if k[0]!='_'} for o in db_objects]
+
+def on_conflict_do_nothing(db_objects: list, constraint_name: str):
+    if not db_objects:
+        logger.info("No new records passed.")
+        return None
+
+    DBTable = db_objects[0].__table__
+    _db_dicts = _db_objects_to_dict(db_objects)
+
+    statement = pg_insert(DBTable).values(_db_dicts) \
+                        .on_conflict_do_nothing(constraint=constraint_name)
+
+    logger.info(f"Committing {len(_db_dicts)} records to {DBTable.name}")
+    session.execute(statement)
+    session.commit()
+    return 
+
 def all_query(db_table):
     """All-Query - Returns all records for given table object."""
     return session.query(db_table)\
