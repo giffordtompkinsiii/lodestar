@@ -32,6 +32,7 @@ tables = ['accounts',
             'assets',
             'balance_history',
             'buoy_history',
+            'clients',
             'position_history',
             'price_history',
             'tidemarks',
@@ -39,7 +40,9 @@ tables = ['accounts',
             'tidemark_history_daily',
             'tidemark_terms',
             'tidemark_types',
+            'typed_tidemarks',
             'vw_believability',
+            'vw_bloomberg',
             'vw_high_watermarks',
             'vw_low_watermarks']
 
@@ -55,6 +58,14 @@ with warnings.catch_warnings():
 Base = automap_base(metadata=metadata)
 
 ## >>> INSERT VIEW DEFINITIONS HERE
+class Bloomberg(Base):
+    __tablename__='vw_bloomberg'
+    __table_args__={'extend_existing': True}
+    asset_id = Column(Integer, ForeignKey('assets.id'), primary_key=True)
+    tidemark_id = Column(Integer, ForeignKey('tidemarks.id'), primary_key=True)
+    unique_constraint = UniqueConstraint(asset_id, tidemark_id)
+
+
 class CurrentBelievability(Base):
     __tablename__='vw_believability'
     __table_args__ = {'extend_existing': True}
@@ -105,25 +116,16 @@ with warnings.catch_warnings():
 
 ## TABLE DEFINITIONS
 Account = Base.classes.accounts
-<<<<<<< HEAD
-AccountType = Base.classes.account_types
-Api = Base.classes.apis
-Asset = Base.classes.assets
-CashBalance = Base.classes.cash_balance_history
-Client = Base.classes.clients
-Position = Base.classes.positions
-=======
 Api = Base.classes.apis
 Asset = Base.classes.assets
 BalanceHistory = Base.classes.balance_history
 BuoyHistory = Base.classes.buoy_history
+Client = Base.classes.clients
 PositionHistory = Base.classes.position_history
->>>>>>> dev
 PriceHistory = Base.classes.price_history
 Tidemark = Base.classes.tidemarks
 TidemarkDaily = Base.classes.tidemark_history_daily
 TidemarkHistory = Base.classes.tidemark_history
-TidemarkTerm = Base.classes.tidemark_terms
 TidemarkType = Base.classes.tidemark_types
 TradeHistory = Base.classes.trade_history
 
@@ -136,9 +138,9 @@ with warnings.catch_warnings():
                                 primaryjoin=(Asset.id==PriceHistory.asset_id),
                                 order_by=lambda: PriceHistory.date.desc(),
                                 uselist=False)
-    Account.active_positions = relationship(Position,
+    Account.active_positions = relationship(PositionHistory,
                                 primaryjoin=(
-                                    (Account.id==Position.account_id) & Position.active)
+                                    (Account.id==PositionHistory.account_id) & PositionHistory.active)
     )
 # Instantiate a session for querying.
 Session = sessionmaker()

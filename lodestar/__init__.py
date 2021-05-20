@@ -3,19 +3,22 @@ import sys
 import os
 from logging.handlers import TimedRotatingFileHandler
 
+tools_dir = os.environ['TTG_TOOLS_DIRECTORY']
 data_file_dir = os.environ['TTG_DATA_DIRECTORY']
-FORMATTER = logging.Formatter(
-    "%(asctime)s |%(levelname)s| %(module)s: %(lineno)d | %(message)s")
-LOG_FILE = os.path.join('logs',f"{__name__}.log")
+
+log_format = "%(asctime)s |%(levelname)s| %(module)s: %(lineno)d | %(message)s"
+formatter = logging.Formatter(log_format)
+## TODO: Add datadirectory to filepath for production version
+log_file = os.path.join('logs',f"{__name__}.log")
 
 def get_console_handler():
    console_handler = logging.StreamHandler(sys.stdout)
-   console_handler.setFormatter(FORMATTER)
+   console_handler.setFormatter(formatter)
    return console_handler
 
 def get_file_handler():
-   file_handler = TimedRotatingFileHandler(LOG_FILE, when='midnight')
-   file_handler.setFormatter(FORMATTER)
+   file_handler = TimedRotatingFileHandler(log_file, when='midnight')
+   file_handler.setFormatter(formatter)
    return file_handler
 
 def get_logger(logger_name, level=None):
