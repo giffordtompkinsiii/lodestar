@@ -13,8 +13,6 @@ Methods
 str_to_timestamp(datetime_str:str) -> dt.datetime:
     Convert IBKR date strings to datetime objects.
 
-
-
 References
 ----------
 IBKR's Trading Workstation API Configuration
@@ -41,19 +39,19 @@ from sqlalchemy import exists
 
 from .google import update_sheet
 
-from .. import logger
+from .. import logging, logger
 from ..database.maps import (account_map, api_map, asset_map, 
-                             client_map, account_type_map)
+                             client_map, account_type_map as type_map)
 from ..database.functions import all_query, collection_to_dataframe
-from ..database.models import (Account, Asset, CashBalance, Client, Position, 
-                               TradeHistory, session)
+from ..database.models import (Account, Asset, BalanceHistory, Client, 
+                                PositionHistory, TradeHistory, session)
 
 # Account Summary Value Update Functions
 # Must have arguements: (account:Account, value:float)
 # Function to call determined by `tag`.
 def update_cash_value(account:Account, value):
-    logger.info(f"Updating {account} total cash value: {value}")
-    c = CashBalance(account_id=account.id, cash_balance=value)
+    logger.info(f"Updating {account.account} total cash value: {value}")
+    c = BalanceHistory(account_id=account.id, balance=value)
     account.pending_cash_balance = c
     return c
 
@@ -74,10 +72,45 @@ def str_to_timestamp(datetime_str:str)->dt.datetime:
     """Convert IBKR date strings to datetime objects."""
     date_str, time_str = datetime_str.split('  ')
     date_obj = dt.date(year=int(date_str[0:4]),
-                   month=int(date_str[4:6]),
-                   day=int(date_str[6:]))
+                       month=int(date_str[4:6]),
+                       day=int(date_str[6:]))
     return dt.datetime.combine(date=date_obj,
                                time=dt.time.fromisoformat(time_str))
+
+def request_client_id(account: Account):
+    logger.debug("Requesting Client Id.")
+    q  = '\n'.join([*[
+        f"[{c.id}] - {c.client}" for c in client_map.values()],
+        f"\nPlease select a client id number from the list above:\n\t> "])
+    return int(input(q))
+
+def request_account_type(account: Account):
+    q  = '\n'.join([*[
+        f"[{t.id}] - {t.type_name}: {t.description}" for t in type_map.values()],
+        f"\Please select an type number from the list above:\n\t> "])
+    return int(input(q))
+
+def request_account_alias(account:Account):
+    return input(f"\nPlease insert an alias for the new account:\n> ").slice(0,20)
+
+def format_new_account(account_name):
+    new_account = Account()
+    new_account.account = account_name
+    logger.info(f"New Account Found: {account_name}")
+    # Ask which client is the account holder
+    new_account.client_id = request_client_id(new_account)
+    logger.info(f"Stored new account's client: \
+                        {client_map[new_account.client_id].client}")
+    new_account.type_id = request_account_type(new_account)
+    logger.info(f"Stored new account's type: \
+                        {type_map[new_account.type_id].type_name}")
+    new_account.alias = request_account_alias(new_account)
+    logger.info(f"Stored new accounts alias: '{new_account.alias}'.")
+    session.add(new_account)
+    session.commit()
+    session.refresh(new_account)
+    return new_account
+        
 
 class IBapi(EWrapper, EClient):
     """The IBKR App object
@@ -152,33 +185,16 @@ class IBapi(EWrapper, EClient):
         for account_name in accountsList.split(',')[:-1]:
             try:
                 account = account_map[account_name]
-                current_positions = account.active_positions
                 account.pending_trades = {}
                 account.pending_cash_balance = None
                 self.accounts[account_name] = account
             except KeyError as ke:
-                logger.info(f"Account {account} does not exist in database. Please format the new account now.")
-                try:
-                    new_account = Account()
-                    logger.warning(f"New Account Found: {account}")
-                    for c in client_map.values():
-                        print(f"[{c.id}] - {c.client}")
-                    new_account.client_id = int(
-                        input("Please select a client id number from the list above:\n\t> "))
-                    logger.warning(f"Stored new account's client: {client_map[new_account.client_id]}")
-                    for t in account_type_map.values():
-                        print(f"[{t.id}] - {t.type_name}: {t.description}")
-                    new_account.type_id = int(
-                        input("Please select an account type id number from the list above:\n\t"))
-                    logger.warning(f"Stored new account's type: {account_type_map[new_account.type_id]}")
-                    new_account.alias = ""
-                    while new_account.alias == "":
-                        new_account.alias = input(f"\nPlease insert an alias for the new account:\n> ")
-                    session.add(new_account)
-                    session.commit()
-                except:
-                    logger.error("Formatting of new account failed. Please format in database and restart application.")
-                    continue
+                logger.warning(f"Account {account_name} does not exist in database. Please format the new account now.")
+                account = format_new_account(account_name)
+                self.accounts[account_name] = account
+                # except:
+                #     logger.error("Formatting of new account failed. Please format in database and restart application.")
+                #     continue
             logger.info(f"Account: {account_name} formatted")
 
 
@@ -211,14 +227,15 @@ class IBapi(EWrapper, EClient):
         """
 
 
-        logger.info(f"Account: {account} \n\tTag: {tag} \n\tValue: {value} \n\tCurrency:{currency}")
+        logger.debug(f"Account: {account} \n\tTag: {tag} \n\tValue: {value} \n\tCurrency:{currency}")
         account = self.accounts[account]
         new_object = tag_func[tag](account, value)
+        return value
 
 
     def accountSummaryEnd(self, reqId=9000):
         """Notifies when all the accounts' information has been received."""
-        logger.info("Account Summary End.")
+        logger.debug("Account Summary End.")
 
     def position(self, account: str, contract: Contract, position: float,
                        avgCost: float):
@@ -239,156 +256,121 @@ class IBapi(EWrapper, EClient):
         avgCost : float
             average cost of the position (not used in this function)
         """
-        logger.info(f"Position Details -- Account: {account}, "
+        logger.debug(f"Position Details -- Account: {account}, "
                     + f"Symbol: {contract.symbol}, SecType: {contract.secType}, "
                     + f"Currency: {contract.currency}, Position: {position}, "
                     + f"Avg cost: {avgCost}")
-        
-        # Pull pending trade by asset_name
-        p = self.accounts[account].pending_trades.get(contract.Symbol, None) 
-        if p:
-            p.position = position
-            logger.info(f"Setting {account} {Contract.symbol} position to "
-                            + f"{p.position}")
-            self.accountSummary()
-        # new_position = Position()
-        # new_position.account_id = self.accounts[account].id  
-        # try:
-        #     new_position.asset_id = a_map[contract.symbol].id
-        # except KeyError as ke:
-        #     logger.warning(f'Asset "{contract.symbol}" not found. Adding new asset to database.')
-        #     new_asset = Asset()
-        #     new_asset.asset = contract.symbol
-        #     session.add(new_asset)
-        #     session.commit()
-        #     session.refresh(new_asset)
-        #     a_map[contract.symbol] = new_asset
-        #     new_position.asset_id = new_asset.id
-        # new_position.quantity = position
-        # new_position.avg_price = avgCost
-        # new_position.last_modified = dt.datetime.now()
-        # self.accounts[account].current_positions[contract.symbol] = new_position
+        # if self.initialized:
+        #     logger.info("App initialized. Running position end procedure.")
+        #     self.positionEnd()
 
-        if self.initialized:
-            logger.info("App initialized. Running position end procedure.")
-            self.positionEnd()
-
-    def create_new_portfolio(self, account: Account):
-        # REMOVE Portfolio() Reference
-        new_portfolio = Portfolio()
-        new_portfolio.account_id = account.id
-        new_portfolio.active = True 
-        new_portfolio.cash = account.total_cash_value
-        self.session.add(new_portfolio)
-        self.session.commit()
-        for position in account.current_positions.values():
-            position.portfolio_id = new_portfolio.id 
-
-        self.session.add_all(account.current_positions.values())
-        self.session.commit()
-        # TODO: get rid of portfolio ref. 
-        # account.active_portfolio = new_portfolio
-        return new_portfolio
-
-    def push_updated_trade_log(self):
-        """Calls push_trade_report."""
-        # TODO: probably don't need this.
-        push_trade_report()
-
-    # def push_current_positions(self):
-    #     """Pushes current positions report to gSheet."""
-
+    # def push_updated_trade_log(self):
+    #     """Calls push_trade_report."""
+    #     # TODO: probably don't need this.
+    #     push_trade_report()
 
     def positionEnd(self):
         """Indicates all the positions have been transmitted."""
-        logger.info("Starting positionEnd.")
-        for a, account in self.accounts.items():
-            for position in account.current_positions.values():
-                position_mask = lambda p: (position.asset_id == p.asset_id) & \
-                                    (position.quantity == p.quantity)
+        logger.debug("Starting positionEnd.")
+    #     for a, account in self.accounts.items():
+    #         for position in account.active_positions:
+    #             position_mask = lambda p: (position.asset_id == p.asset_id) & \
+    #                                 (position.quantity == p.quantity)
 
-                # TODO: get rid of portfolio ref. 
-                # db_position = next((p for p in account.active_portfolio \
-                                                    #  .positions_collection \
-                                #    if position_mask(p)), None)
-                if db_position:
-                    logger.info(f"Matching position for {account.account} - {db_position.assets.asset} - {db_position.quantity}")
-                else:
-                    logger.info(f"New position. Formatting new portfolio for account {account.account}.")
-                    new_portfolio = self.create_new_portfolio(account)
-                    logger.info("Sleeping to allow update.")
-                    time.sleep(30)
-                    break
-        print("Pushing current positions to google sheet: https://docs.google.com/spreadsheets/d/1-r81lqrVvAZxHWRX6n2sSI8im_Be6xA0iCU9YB0LkAg/edit?pli=1#gid=1803566426")
-        self.push_current_positions()
-        logger.info("PositionEnd")
+    #             # TODO: get rid of portfolio ref. 
+    #             # db_position = next((p for p in account.active_portfolio \
+    #                                                 #  .positions_collection \
+    #                             #    if position_mask(p)), None)
+    #             if db_position:
+    #                 logger.info(f"Matching position for {account.account} - {db_position.assets.asset} - {db_position.quantity}")
+    #             else:
+    #                 logger.debug(f"New position. Formatting new portfolio for account {account.account}.")
+    #                 new_portfolio = self.create_new_portfolio(account)
+    #                 logger.debug("Sleeping to allow update.")
+    #                 time.sleep(30)
+    #                 break
+    #     print("Pushing current positions to google sheet: https://docs.google.com/spreadsheets/d/1-r81lqrVvAZxHWRX6n2sSI8im_Be6xA0iCU9YB0LkAg/edit?pli=1#gid=1803566426")
+    #     self.push_current_positions()
+    #     logger.debug("PositionEnd")
 
     def execDetailsEnd(self, reqId: int):
         """Indicates the end of the Execution reception."""
-        logger.info("Starting execDetailsEnd.")
-        print("Pushing updated Trade Log to google sheet: https://docs.google.com/spreadsheets/d/1-r81lqrVvAZxHWRX6n2sSI8im_Be6xA0iCU9YB0LkAg/edit?pli=1#gid=1011548667")
-        self.push_updated_trade_log()
-        logger.info("ExecDetailsEnd")
+        logger.debug("Starting execDetailsEnd.")
+        logger.debug("Committing new positions.")
+        session.commit()
+    #     print("Pushing updated Trade Log to google sheet: https://docs.google.com/spreadsheets/d/1-r81lqrVvAZxHWRX6n2sSI8im_Be6xA0iCU9YB0LkAg/edit?pli=1#gid=1011548667")
+    #     self.push_updated_trade_log()
+        logger.debug("ExecDetailsEnd")
 
     def execDetails(self, reqId: int, contract: Contract, execution: Execution):
         """Provides the executions which happened in the last 24 hours."""
-        logger.info(f"ExecutionId: {execution.execId}, ReqId: {reqId}, " 
+        logger.debug(f"ExecutionId: {execution.execId}, ReqId: {reqId}, " 
             + f"Symbol: {contract.symbol}, SecType:, {contract.secType}, "
             + f"Time: {execution.time}, AccountNumber: {execution.acctNumber}, "
             + f"Side: {execution.side}, Shares: {execution.shares}, "
             + f"Price: {execution.price}, TotalShares: {execution.cumQty}, "
             + f"AvgPrice: {execution.avgPrice}")
-            
+
         account = self.accounts[execution.acctNumber]
-
-        if any(filter(lambda t: (
-                        t.account_id==account.id) & (
-                        t.ref_id==execution.execId), 
-                      account.trade_history_collection)):
-            logger.info("Trade already logged: {execution.execId}")
+        position_refs = [p.ref_id for p in account.position_history_collection]
+        if execution.execId in position_refs:
+            logger.debug(f"Trade already logged: {execution.execId}")
             return
-        trade = TradeHistory()
-        trade.account_id = account.id
-        trade.asset_id = a_map[contract.symbol].id
-        trade.api_id = api_map['ibkr'].id
-        trade.ref_id = execution.permId # .rsplit('.', maxsplit=1) # Corrections are denoted by id's differing only by the digits after the final period.
-        trade.quantity = (-1 + 2 * int(execution.side=='BOT')) * int(execution.shares)
-        trade.price = float(execution.price)
-        trade.trade_timestamp = str_to_timestamp(execution.time)
 
-        account.pending_trades[contract.symbol] = trade
+        sign = (-1 + 2 * (execution.side=='BOT'))
+        position = PositionHistory(account_id=account.id,
+                                   timestamp=str_to_timestamp(execution.time),
+                                   asset_id=asset_map[contract.symbol].id,
+                                   api_id=api_map['ibkr'].id,
+                                   ref_id=execution.execId,
+                                   price=execution.price,
+                                   quantity=sign * execution.shares,
+                                   position=sign * execution.cumQty)
+        logger.debug(f"Adding {position.__dict__} to session.")
+        session.add(position)
+
+    #     trade = TradeHistory()
+    #     trade.account_id = account.id
+    #     trade.asset_id = a_map[contract.symbol].id
+    #     trade.api_id = api_map['ibkr'].id
+    #     trade.ref_id = execution.permId # .rsplit('.', maxsplit=1) # Corrections are denoted by id's differing only by the digits after the final period.
+    #     trade.quantity = (-1 + 2 * int(execution.side=='BOT')) * int(execution.shares)
+    #     trade.price = float(execution.price)
+    #     trade.trade_timestamp = str_to_timestamp(execution.time)
+
+    #     account.pending_trades[contract.symbol] = trade
         
-        if self.initialized:
-            self.execDetailsEnd()
+    #     if self.initialized:
+    #         self.execDetailsEnd()
 
-    def updatePortfolio(self, contract: Contract, position: float,
-                        marketPrice: float, marketValue: float,
-                        averageCost: float, unrealizedPNL: float,
-                        realizedPNL: float, accountName: str):
-        """Receives the subscribed account's portfolio. 
+    # def updatePortfolio(self, contract: Contract, position: float,
+    #                     marketPrice: float, marketValue: float,
+    #                     averageCost: float, unrealizedPNL: float,
+    #                     realizedPNL: float, accountName: str):
+    #     """Receives the subscribed account's portfolio. 
         
-        This function will receive only the portfolio of the subscribed account. If the portfolios of all managed accounts are needed, refer to EClientSocket::reqPosition After the initial callback to updatePortfolio, callbacks only occur for positions which have changed.
-        """
-        logger.info("UpdatePortfolio.", "Symbol:", contract.symbol, "SecType:", 
-              contract.secType, "Exchange:", contract.exchange, "Position:", 
-              position, "MarketPrice:", marketPrice, "MarketValue:", marketValue, 
-              "AverageCost:", averageCost, "UnrealizedPNL:", unrealizedPNL, 
-              "RealizedPNL:", realizedPNL, "AccountName:", accountName)
+    #     This function will receive only the portfolio of the subscribed account. If the portfolios of all managed accounts are needed, refer to EClientSocket::reqPosition After the initial callback to updatePortfolio, callbacks only occur for positions which have changed.
+    #     """
+    #     logger.debug("UpdatePortfolio.", "Symbol:", contract.symbol, "SecType:", 
+    #           contract.secType, "Exchange:", contract.exchange, "Position:", 
+    #           position, "MarketPrice:", marketPrice, "MarketValue:", marketValue, 
+    #           "AverageCost:", averageCost, "UnrealizedPNL:", unrealizedPNL, 
+    #           "RealizedPNL:", realizedPNL, "AccountName:", accountName)
 
-    def updateAccountValue(self, key: str, val: str, currency: str, 
-                        accountName: str):
-        """Receives the subscribed account's information. 
+    # def updateAccountValue(self, key: str, val: str, currency: str, 
+    #                     accountName: str):
+    #     """Receives the subscribed account's information. 
         
-        Only one account can be subscribed at a time. After the initial callback to updateAccountValue, callbacks only occur for values which have changed. This occurs at the time of a position change, or every 3 minutes at most. This frequency cannot be adjusted.
-        """
-        if key == 'CashBalance':
-            logger.info("UpdateAccountValue. Key:", key, "Value:", val,
-                "Currency:", currency, "AccountName:", accountName)
+    #     Only one account can be subscribed at a time. After the initial callback to updateAccountValue, callbacks only occur for values which have changed. This occurs at the time of a position change, or every 3 minutes at most. This frequency cannot be adjusted.
+    #     """
+    #     if key == 'CashBalance':
+    #         logger.debug("UpdateAccountValue. Key:", key, "Value:", val,
+    #             "Currency:", currency, "AccountName:", accountName)
 
-    # def updateAccountTime(self, timeStamp: str):
-    #     "Receives the last time on which the account was updated."
-    #     logger.info("UpdateAccountTime. Time:", timeStamp)
-    #     self.latest_update.creation_date = str_to_timestamp(timeStamp)
+    # # def updateAccountTime(self, timeStamp: str):
+    # #     "Receives the last time on which the account was updated."
+    # #     logger.debug("UpdateAccountTime. Time:", timeStamp)
+    # #     self.latest_update.creation_date = str_to_timestamp(timeStamp)
 
 def run_ibkr(port: int = 7496, disconnect: bool = False, debug: bool = False):
     app = IBapi()
@@ -402,27 +384,28 @@ def run_ibkr(port: int = 7496, disconnect: bool = False, debug: bool = False):
         run_ibkr(port=port, disconnect=disconnect, debug=debug)
 
     #################
-    app.debug = debug
+    if debug:
+        logger.setLevel(logging.DEBUG)
     #################
 
     #Start the socket in a thread
-    logger.info("Starting thread.")
+    logger.debug("Starting thread.")
     api_thread = threading.Thread(target=app.run, daemon=True)
     api_thread.start()
 
     time.sleep(10) # Sleep interval to allow time for incoming price data
     if app.isConnected():
-        logger.info(f"Requesting account summary Connection: {app.isConnected()}")
+        logger.debug(f"Requesting account summary Connection: {app.isConnected()}")
         app.reqAccountSummary(groupName='All', 
                                 tags=AccountSummaryTags.TotalCashValue,
                                 reqId=9000)
         time.sleep(10)
 
-        logger.info("requesting positions data.")
+        logger.debug("requesting positions data.")
         app.reqPositions()
         time.sleep(10)
 
-        logger.info("requesting executions data.")
+        logger.debug("requesting executions data.")
         execution_filter = ExecutionFilter()
         app.reqExecutions(reqId=9000, execFilter=execution_filter)
         time.sleep(10)
@@ -452,5 +435,5 @@ if __name__=='__main__':
                         help='Run in test or debug mode. This will not push new reports to the google sheet but will still print out messages from the app.',
                         action='store_true')
     args = parser.parse_args()
-    logger.info(f"{args.__dict__}")
+    logger.debug(f"{args.__dict__}")
     run_ibkr(**args.__dict__)

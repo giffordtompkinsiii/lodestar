@@ -23,7 +23,7 @@ import time
 from tqdm import tqdm
 import multiprocessing as mp
 from sqlalchemy import exists
-from data_manager import logger
+from .. import logger
 
 from ..database.models import Asset, TidemarkHistory, Tidemark, session
 from ..database.functions import (all_query, update_database_object, 

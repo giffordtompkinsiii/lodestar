@@ -19,6 +19,8 @@ tables : list
 """
 import warnings
 
+from sqlalchemy.sql.expression import over
+
 from . import engine, metadata, logger
 
 from sqlalchemy import (Boolean, Column, Date, DateTime, ForeignKey, Float, 
@@ -28,6 +30,7 @@ from sqlalchemy.ext.automap import automap_base
 
 
 tables = ['accounts',
+            'account_types',
             'apis',
             'assets',
             'balance_history',
@@ -116,6 +119,7 @@ with warnings.catch_warnings():
 
 ## TABLE DEFINITIONS
 Account = Base.classes.accounts
+AccountType = Base.classes.account_types
 Api = Base.classes.apis
 Asset = Base.classes.assets
 BalanceHistory = Base.classes.balance_history
@@ -138,7 +142,8 @@ with warnings.catch_warnings():
                                 primaryjoin=(Asset.id==PriceHistory.asset_id),
                                 order_by=lambda: PriceHistory.date.desc(),
                                 uselist=False)
-    Account.active_positions = relationship(PositionHistory,
+    Account.active_positions = relationship(
+                                PositionHistory,
                                 primaryjoin=(
                                     (Account.id==PositionHistory.account_id) & PositionHistory.active)
     )
