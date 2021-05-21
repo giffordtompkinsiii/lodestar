@@ -43,6 +43,7 @@ tables = ['accounts',
             'tidemark_history_daily',
             'tidemark_terms',
             'tidemark_types',
+            'transaction_history',
             'typed_tidemarks',
             'vw_believability',
             'vw_bloomberg',
@@ -131,22 +132,29 @@ Tidemark = Base.classes.tidemarks
 TidemarkDaily = Base.classes.tidemark_history_daily
 TidemarkHistory = Base.classes.tidemark_history
 TidemarkType = Base.classes.tidemark_types
-TradeHistory = Base.classes.trade_history
+TransactionHistory = Base.classes.transaction_history
 
 
 
 ## CUSTOM RELATIONSHIP DEFINITIONS
-with warnings.catch_warnings():
-    warnings.simplefilter('ignore', sa_exc.SAWarning)
-    Asset.current_price = relationship(PriceHistory,
-                                primaryjoin=(Asset.id==PriceHistory.asset_id),
-                                order_by=lambda: PriceHistory.date.desc(),
-                                uselist=False)
-    Account.active_positions = relationship(
-                                PositionHistory,
+Asset.current_price = relationship(PriceHistory,
+                            primaryjoin=(Asset.id==PriceHistory.asset_id),
+                            order_by=lambda: PriceHistory.date.desc(),
+                            uselist=False,
+                            overlaps=('price_history_collection'))
+
+Account.current_balance = relationship(
+                                BalanceHistory,
                                 primaryjoin=(
-                                    (Account.id==PositionHistory.account_id) & PositionHistory.active)
-    )
+                                    Account.id==BalanceHistory.account_id),
+                                order_by=lambda: BalanceHistory.date.desc(),
+                                uselist=False,
+                                overlaps=('balance_history_collection'))
+    # BalanceHistory.active_positions = relationship(
+    #                             PositionHistory,
+    #                             primaryjoin=(
+    #                                 (Account.id==PositionHistory.account_id) & PositionHistory.active)
+    # )
 # Instantiate a session for querying.
 Session = sessionmaker()
 session = Session(bind=engine, expire_on_commit=False)

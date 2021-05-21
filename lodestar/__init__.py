@@ -11,6 +11,9 @@ formatter = logging.Formatter(log_format)
 ## TODO: Add datadirectory to filepath for production version
 log_file = os.path.join('logs',f"{__name__}.log")
 
+def beep():
+    os.system('afplay /System/Library/Sounds/Sosumi.aiff')
+
 def get_console_handler():
    console_handler = logging.StreamHandler(sys.stdout)
    console_handler.setFormatter(formatter)

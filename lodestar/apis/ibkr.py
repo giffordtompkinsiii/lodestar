@@ -39,78 +39,95 @@ from sqlalchemy import exists
 
 from .google import update_sheet
 
-from .. import logging, logger
+from .. import logging, logger, beep
 from ..database.maps import (account_map, api_map, asset_map, 
                              client_map, account_type_map as type_map)
-from ..database.functions import all_query, collection_to_dataframe
-from ..database.models import (Account, Asset, BalanceHistory, Client, 
-                                PositionHistory, TradeHistory, session)
-
-# Account Summary Value Update Functions
-# Must have arguements: (account:Account, value:float)
-# Function to call determined by `tag`.
-def update_cash_value(account:Account, value):
-    logger.info(f"Updating {account.account} total cash value: {value}")
-    c = BalanceHistory(account_id=account.id, balance=value)
-    account.pending_cash_balance = c
-    return c
-
-tag_func = {}
-tag_func['TotalCashValue'] = update_cash_value
-
-# from .reports import push_trade_report
-# TODO Move sheet update methods to reports module and import them here.
-# Can add method, `func`, to an instance, `a`, by defining the function and 
-# using its __get__() method. i.e. `a.func = func.__get__(a)`.
-# https://stackoverflow.com/questions/972/adding-a-method-to-an-existing-object-instance
+from ..database.functions import on_conflict_do_nothing, on_conflict_do_update
+from ..database.models import (Account, BalanceHistory, PositionHistory, 
+                                TransactionHistory, session)
 
 account_map = {a.account: a for a in account_map.values()}
 asset_map = {a.asset: a for a in asset_map.values()}
 api_map = {a.api: a for a in api_map.values()}
 
+# IBKR Account Helper Functions
 def str_to_timestamp(datetime_str:str)->dt.datetime:
     """Convert IBKR date strings to datetime objects."""
     date_str, time_str = datetime_str.split('  ')
     date_obj = dt.date(year=int(date_str[0:4]),
-                       month=int(date_str[4:6]),
-                       day=int(date_str[6:]))
+                    month=int(date_str[4:6]),
+                    day=int(date_str[6:]))
     return dt.datetime.combine(date=date_obj,
-                               time=dt.time.fromisoformat(time_str))
+                            time=dt.time.fromisoformat(time_str))
 
 def request_client_id(account: Account):
     logger.debug("Requesting Client Id.")
     q  = '\n'.join([*[
         f"[{c.id}] - {c.client}" for c in client_map.values()],
         f"\nPlease select a client id number from the list above:\n\t> "])
-    return int(input(q))
+    try:
+        new_client = client_map[int(input(q))]
+        account.client_id = new_client.id
+        logger.info(f"Stored new account's client: {new_client.client}")
+    except KeyError as ke:
+        logger.error("Incorrect id selected. Please try again.")
+        return request_client_id(account)
+    return account
 
 def request_account_type(account: Account):
     q  = '\n'.join([*[
         f"[{t.id}] - {t.type_name}: {t.description}" for t in type_map.values()],
         f"\Please select an type number from the list above:\n\t> "])
-    return int(input(q))
+    try:
+        new_type = type_map[int(input(q))]
+        account.type_id = new_type.id
+        logger.info(f"Stored new account's type: {new_type.type_name}")
+    except:
+        logger.error("Incorrect type number selected. Please try again.")
+        return request_account_type(account)
+    return account
 
 def request_account_alias(account:Account):
-    return input(f"\nPlease insert an alias for the new account:\n> ").slice(0,20)
+    q = f"\nPlease insert an alias for the new account:\n> "
+    new_alias = input(q)
+    if len(new_alias) > 20:
+        logger.warning("Alias must be less than 20 characters. Please try again.")
+        return request_account_alias(account)
+    account.alias = new_alias
+    logger.info(f"Stored new account's alias: {account.alias}")
+    return account
 
 def format_new_account(account_name):
     new_account = Account()
     new_account.account = account_name
     logger.info(f"New Account Found: {account_name}")
-    # Ask which client is the account holder
-    new_account.client_id = request_client_id(new_account)
-    logger.info(f"Stored new account's client: \
-                        {client_map[new_account.client_id].client}")
-    new_account.type_id = request_account_type(new_account)
-    logger.info(f"Stored new account's type: \
-                        {type_map[new_account.type_id].type_name}")
-    new_account.alias = request_account_alias(new_account)
-    logger.info(f"Stored new accounts alias: '{new_account.alias}'.")
+    # Format the new account's client, type and alias.
+    new_account = request_client_id(new_account)
+    new_account = request_account_type(new_account)
+    new_account = request_account_alias(new_account)
+
     session.add(new_account)
     session.commit()
     session.refresh(new_account)
     return new_account
         
+
+
+# Account Summary Value Update Functions
+########################################
+# Must have arguements: (account:Account, value:float)
+# Function to call determined by `tag`.
+def update_cash_value(account:Account, value):
+    unique_key = 'balance_history_account_id_date_key'
+    c = BalanceHistory(account_id=account.id, 
+                       balance=value, 
+                       date=dt.date.today())
+    logger.debug(f"Updating {account.account} total cash value: {value}")
+    on_conflict_do_update(c, unique_key)
+    return c
+
+tag_func = {}
+tag_func['TotalCashValue'] = update_cash_value
 
 class IBapi(EWrapper, EClient):
     """The IBKR App object
@@ -160,22 +177,32 @@ class IBapi(EWrapper, EClient):
         Receives the subscribed account's information. 
     """
 
+    trade_history_uk = 'position_history_account_id_api_id_ref_id_key'
+
     def __init__(self):
         from ..database.models import session
         EClient.__init__(self, self)
-        self.session = session
         self.accounts = {}
         self.initialized = False
         self.debug = False
-        self.closing_processed = False
-        self.latest_update = None
+        self.market_closed = False
+        self.closing = False
+
+        self.account_summary_closed = False
+        self.position_closed = False
+        self.transactions_closed = False
 
     def check_close(self):
-        """Check if market is closed or if IBKR.closing procedures have already run."""
+        """Check if market is closed.
+        
+        Returns True or False or if IBKR closing procedures have already run."""
         utc_today = dt.datetime.utcnow()
-        closed = (utc_today + dt.timedelta(hours=3)).date() != utc_today
-        return closed and self.closing_processed
-
+        market_closed = (utc_today + dt.timedelta(hours=3)).date() != utc_today
+        if not market_closed:
+            logger.info("Market is not closed.")
+        else:
+            logger.info("Market is closed.")
+        return market_closed
 
     def managedAccounts(self, accountsList: str):
         """Receives a comma-separated string with the managed account ids. 
@@ -185,17 +212,12 @@ class IBapi(EWrapper, EClient):
         for account_name in accountsList.split(',')[:-1]:
             try:
                 account = account_map[account_name]
-                account.pending_trades = {}
-                account.pending_cash_balance = None
-                self.accounts[account_name] = account
             except KeyError as ke:
                 logger.warning(f"Account {account_name} does not exist in database. Please format the new account now.")
                 account = format_new_account(account_name)
-                self.accounts[account_name] = account
-                # except:
-                #     logger.error("Formatting of new account failed. Please format in database and restart application.")
-                #     continue
-            logger.info(f"Account: {account_name} formatted")
+            account.pending_trades = []
+            self.accounts[account_name] = account
+            logger.debug(f"Account: {account.account} formatted.")
 
 
     def accountSummary(self, reqId:str, account:str, tag:str, value:str, 
@@ -225,17 +247,17 @@ class IBapi(EWrapper, EClient):
         See TWS API Reference:
         https://interactivebrokers.github.io/tws-api/interfaceIBApi_1_1EWrapper.html#acd761f48771f61dd0fb9e9a7d88d4f04
         """
-
-
-        logger.debug(f"Account: {account} \n\tTag: {tag} \n\tValue: {value} \n\tCurrency:{currency}")
+        logger.debug(f"Account: {account} Tag: {tag} "
+                     + f"Value: {value} Currency:{currency}")
         account = self.accounts[account]
-        new_object = tag_func[tag](account, value)
+        tag_func[tag](account, value)
         return value
-
 
     def accountSummaryEnd(self, reqId=9000):
         """Notifies when all the accounts' information has been received."""
-        logger.debug("Account Summary End.")
+        logger.info("Account Cash Balances Updated.")
+        if self.closing:
+            self.account_summary_closed = True
 
     def position(self, account: str, contract: Contract, position: float,
                        avgCost: float):
@@ -260,47 +282,31 @@ class IBapi(EWrapper, EClient):
                     + f"Symbol: {contract.symbol}, SecType: {contract.secType}, "
                     + f"Currency: {contract.currency}, Position: {position}, "
                     + f"Avg cost: {avgCost}")
-        # if self.initialized:
-        #     logger.info("App initialized. Running position end procedure.")
-        #     self.positionEnd()
-
-    # def push_updated_trade_log(self):
-    #     """Calls push_trade_report."""
-    #     # TODO: probably don't need this.
-    #     push_trade_report()
+        if contract.secType != 'STK':
+            return
+        account = self.accounts[account]
+        b_id = account.current_balance.id
+        p = PositionHistory(balance_id=b_id,
+                            asset_id=asset_map[contract.symbol].id,
+                            api_id=api_map['ibkr'].id,
+                            position=position)
+        logger.debug(f"Adding PositionHistory({p.__dict__}) to database")
+        on_conflict_do_update(p, 'position_history_balance_id_asset_id_key')
 
     def positionEnd(self):
         """Indicates all the positions have been transmitted."""
-        logger.debug("Starting positionEnd.")
-    #     for a, account in self.accounts.items():
-    #         for position in account.active_positions:
-    #             position_mask = lambda p: (position.asset_id == p.asset_id) & \
-    #                                 (position.quantity == p.quantity)
-
-    #             # TODO: get rid of portfolio ref. 
-    #             # db_position = next((p for p in account.active_portfolio \
-    #                                                 #  .positions_collection \
-    #                             #    if position_mask(p)), None)
-    #             if db_position:
-    #                 logger.info(f"Matching position for {account.account} - {db_position.assets.asset} - {db_position.quantity}")
-    #             else:
-    #                 logger.debug(f"New position. Formatting new portfolio for account {account.account}.")
-    #                 new_portfolio = self.create_new_portfolio(account)
-    #                 logger.debug("Sleeping to allow update.")
-    #                 time.sleep(30)
-    #                 break
-    #     print("Pushing current positions to google sheet: https://docs.google.com/spreadsheets/d/1-r81lqrVvAZxHWRX6n2sSI8im_Be6xA0iCU9YB0LkAg/edit?pli=1#gid=1803566426")
-    #     self.push_current_positions()
-    #     logger.debug("PositionEnd")
+        logger.info("Current Positions Updated.")
+        if self.closing:
+            self.position_closed = True
 
     def execDetailsEnd(self, reqId: int):
         """Indicates the end of the Execution reception."""
-        logger.debug("Starting execDetailsEnd.")
-        logger.debug("Committing new positions.")
-        session.commit()
-    #     print("Pushing updated Trade Log to google sheet: https://docs.google.com/spreadsheets/d/1-r81lqrVvAZxHWRX6n2sSI8im_Be6xA0iCU9YB0LkAg/edit?pli=1#gid=1011548667")
-    #     self.push_updated_trade_log()
-        logger.debug("ExecDetailsEnd")
+        for a in self.accounts.values():
+            a.pending_trades = on_conflict_do_nothing(a.pending_trades, 
+                                            constraint_name=self.trade_history_uk)
+        logger.info("Transactions Updated")
+        if self.closing:
+            self.transactions_closed = True
 
     def execDetails(self, reqId: int, contract: Contract, execution: Execution):
         """Provides the executions which happened in the last 24 hours."""
@@ -312,114 +318,86 @@ class IBapi(EWrapper, EClient):
             + f"AvgPrice: {execution.avgPrice}")
 
         account = self.accounts[execution.acctNumber]
-        position_refs = [p.ref_id for p in account.position_history_collection]
-        if execution.execId in position_refs:
-            logger.debug(f"Trade already logged: {execution.execId}")
-            return
-
         sign = (-1 + 2 * (execution.side=='BOT'))
-        position = PositionHistory(account_id=account.id,
+        trade = TransactionHistory(account_id=account.id,
                                    timestamp=str_to_timestamp(execution.time),
                                    asset_id=asset_map[contract.symbol].id,
                                    api_id=api_map['ibkr'].id,
                                    ref_id=execution.execId,
                                    price=execution.price,
-                                   quantity=sign * execution.shares,
-                                   position=sign * execution.cumQty)
-        logger.debug(f"Adding {position.__dict__} to session.")
-        session.add(position)
+                                   quantity=sign * execution.shares)
+        logger.debug(f"Adding {trade.__dict__} to session.")
+        account.pending_trades.append(trade)
 
-    #     trade = TradeHistory()
-    #     trade.account_id = account.id
-    #     trade.asset_id = a_map[contract.symbol].id
-    #     trade.api_id = api_map['ibkr'].id
-    #     trade.ref_id = execution.permId # .rsplit('.', maxsplit=1) # Corrections are denoted by id's differing only by the digits after the final period.
-    #     trade.quantity = (-1 + 2 * int(execution.side=='BOT')) * int(execution.shares)
-    #     trade.price = float(execution.price)
-    #     trade.trade_timestamp = str_to_timestamp(execution.time)
+    def closing_procedures(self):
+        """Running closing procedures."""
+        logger.info("Initializing closing procedure.")
+        self.closing = True
+        self.reqPositions()
+        self.reqAccountSummary(reqId=9000, groupName='All',     
+                               tags=AccountSummaryTags.TotalCashValue)
+        self.reqExecutions(reqId=9000, execFilter=ExecutionFilter())
+        while not all([self.transactions_closed,
+                      self.position_closed,
+                      self.account_summary_closed]):
+            time.sleep(10)
+        logger.info("App is disconnecting.")
+        self.disconnect()
 
-    #     account.pending_trades[contract.symbol] = trade
+    def check_connection_or_wait(self, ip, port, client_id):
+        if not self.isConnected():
+            connection_msg = "App connection failed. " \
+                            + "Attempting to establish connection. " \
+                            + "Be sure to log in to IBKR Desktop App."
+            beep()
+            logger.warning(f"\n{'='*len(connection_msg)}\n{connection_msg}\n{'='*len(connection_msg)}\n")
+
+            input("Press Enter after logging in, "
+                    + "or press `Ctrl+C` to disconnect.")
+            self.connect(ip, port, client_id)
+            time.sleep(10)
+            self.check_connection_or_wait(ip, port, client_id)
         
-    #     if self.initialized:
-    #         self.execDetailsEnd()
-
-    # def updatePortfolio(self, contract: Contract, position: float,
-    #                     marketPrice: float, marketValue: float,
-    #                     averageCost: float, unrealizedPNL: float,
-    #                     realizedPNL: float, accountName: str):
-    #     """Receives the subscribed account's portfolio. 
-        
-    #     This function will receive only the portfolio of the subscribed account. If the portfolios of all managed accounts are needed, refer to EClientSocket::reqPosition After the initial callback to updatePortfolio, callbacks only occur for positions which have changed.
-    #     """
-    #     logger.debug("UpdatePortfolio.", "Symbol:", contract.symbol, "SecType:", 
-    #           contract.secType, "Exchange:", contract.exchange, "Position:", 
-    #           position, "MarketPrice:", marketPrice, "MarketValue:", marketValue, 
-    #           "AverageCost:", averageCost, "UnrealizedPNL:", unrealizedPNL, 
-    #           "RealizedPNL:", realizedPNL, "AccountName:", accountName)
-
-    # def updateAccountValue(self, key: str, val: str, currency: str, 
-    #                     accountName: str):
-    #     """Receives the subscribed account's information. 
-        
-    #     Only one account can be subscribed at a time. After the initial callback to updateAccountValue, callbacks only occur for values which have changed. This occurs at the time of a position change, or every 3 minutes at most. This frequency cannot be adjusted.
-    #     """
-    #     if key == 'CashBalance':
-    #         logger.debug("UpdateAccountValue. Key:", key, "Value:", val,
-    #             "Currency:", currency, "AccountName:", accountName)
-
-    # # def updateAccountTime(self, timeStamp: str):
-    # #     "Receives the last time on which the account was updated."
-    # #     logger.debug("UpdateAccountTime. Time:", timeStamp)
-    # #     self.latest_update.creation_date = str_to_timestamp(timeStamp)
 
 def run_ibkr(port: int = 7496, disconnect: bool = False, debug: bool = False):
     app = IBapi()
-    logger.info("Attempting to establish connection.")
-    app.connect('127.0.0.1', port, 123)
+    logger.info("Establishing connection.")
+    app.connect('127.0.0.1', port, 124)
     time.sleep(10) #Sleep interval to allow time for connection to server
-    if not app.isConnected():
-        connection_msg = "App connection failed. Attempting to establish connection. Be sure to log in to IBKR Desktop App."
-        logger.warning(f"\n{'='*len(connection_msg)}\n{connection_msg}\n{'='*len(connection_msg)}\n")
-        app.disconnect()
-        run_ibkr(port=port, disconnect=disconnect, debug=debug)
+    app.check_connection_or_wait('127.0.0.1', port, 124)
 
     #################
-    if debug:
-        logger.setLevel(logging.DEBUG)
+    logger.setLevel((debug * logging.DEBUG) or logging.INFO)
     #################
 
-    #Start the socket in a thread
-    logger.debug("Starting thread.")
     api_thread = threading.Thread(target=app.run, daemon=True)
     api_thread.start()
 
     time.sleep(10) # Sleep interval to allow time for incoming price data
     if app.isConnected():
-        logger.debug(f"Requesting account summary Connection: {app.isConnected()}")
+        logger.info("App is requesting `Account Balance Data`")
         app.reqAccountSummary(groupName='All', 
                                 tags=AccountSummaryTags.TotalCashValue,
                                 reqId=9000)
         time.sleep(10)
 
-        logger.debug("requesting positions data.")
+        logger.info("App is requesting `Positions Data`")
         app.reqPositions()
         time.sleep(10)
 
-        logger.debug("requesting executions data.")
+        logger.info("App is requesting `Executions Data`")
         execution_filter = ExecutionFilter()
         app.reqExecutions(reqId=9000, execFilter=execution_filter)
         time.sleep(10)
 
-        app.reqPnL(reqId=9001, account="U3002184", modelCode="")
-        time.sleep(10)
-        # TODO: format so that this only runs once called rather than at import.
-        # push_reports()
-
         app.initialized = True
         time.sleep(10)
 
-    if disconnect:
-        app.disconnect()
+    while not app.market_closed:
+        app.market_closed = app.check_close()
+        time.sleep(2)
+
+    app.closing_procedures()
 
 if __name__=='__main__':
     parser  = argparse.ArgumentParser(prog='ibkr')

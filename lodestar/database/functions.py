@@ -32,19 +32,34 @@ def _db_objects_to_dict(db_objects):
 
 def on_conflict_do_nothing(db_objects: list, constraint_name: str):
     if not db_objects:
-        logger.info("No new records passed.")
-        return None
-
+        logger.debug("No new records passed.")
+        return db_objects
     DBTable = db_objects[0].__table__
     _db_dicts = _db_objects_to_dict(db_objects)
 
     statement = pg_insert(DBTable).values(_db_dicts) \
                         .on_conflict_do_nothing(constraint=constraint_name)
 
-    logger.info(f"Committing {len(_db_dicts)} records to {DBTable.name}")
+    logger.debug(f"Committing {len(_db_dicts)} records to {DBTable.name}")
     session.execute(statement)
     session.commit()
-    return 
+
+    return []
+
+def on_conflict_do_update(db_object, constraint_name: str):
+    """Upsert for individual item."""
+    if not db_object:
+        logger.info("No new record passed.")
+        return db_object
+    DBTable = db_object.__table__
+    _db_dict = {k:v for k,v in db_object.__dict__.items() if k[0]!='_'}
+    statement = pg_insert(DBTable).values(_db_dict) \
+                                  .on_conflict_do_update(set_=_db_dict,
+                                           constraint=constraint_name)
+    logger.debug(f"Updating record for {DBTable.name}")
+    session.execute(statement)
+    session.commit()
+    return []
 
 def all_query(db_table):
     """All-Query - Returns all records for given table object."""
