@@ -25,6 +25,7 @@ from sqlalchemy import types, UniqueConstraint, PrimaryKeyConstraint
 from psycopg2 import errors as psycopg_errors
 from . import logger
 from .models import session, Asset
+from typing import List, Tuple
 
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 def _db_objects_to_dict(db_objects):
@@ -141,7 +142,7 @@ def collection_to_dataframe(query_results,
         return dataframe
 
 def compare_to_db(import_df: pd.DataFrame, db_records: list, db_table,
-                  ignore_nulls=False, debug=False)->(list, list):
+                  ignore_nulls=False, debug=False) -> Tuple[list, list]:
     """Return import or update items based on existing records.
 
     Takes the new and/or calculated values and compares them to the current database model.
@@ -278,7 +279,7 @@ def add_assets(*asset_names):
         # new_asset.asset = asset_name 
         try:
             session.merge(Asset(asset=asset_name))
-        except IntegrityError:
+        except psycopg_errors.IntegrityError:
             continue
     session.commit()
         # try:

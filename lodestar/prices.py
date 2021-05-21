@@ -71,7 +71,7 @@ def get_prices(asset: Asset, last_date: dt.date = None,
         f"{asset.asset} price records since last date: {history.shape[0]}")
 
     if not asset.price_history_collection and history.empty:
-        info.warning(f"No yfinance records or database records for {asset.asset}")
+        logger.warning(f"No yfinance records or database records for {asset.asset}")
         return pd.DataFrame()
     
     logger.info("Sleeping for yFinance API.")
