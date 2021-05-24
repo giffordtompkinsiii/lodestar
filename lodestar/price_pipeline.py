@@ -126,7 +126,7 @@ class PricePipeline(Pipeline):
                     + f"debug: {self.debug})"
         return repr_str
 
-class DailyTideamrk(Pipeline):
+class DailyTidemark(Pipeline):
     """Pipeline to calculate DailyTidemarks for new PriceHistory records."""
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
