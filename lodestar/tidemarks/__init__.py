@@ -29,111 +29,115 @@ from ..database.maps import asset_map, tidemark_map
 from ..database.models import Asset, PriceHistory, Tidemark, TidemarkType
 from ..database.functions import all_query, collection_to_dataframe as to_df
 
-debug = False
-logger.info(f"Debug set to {debug}.")
-tt_map = {tt.id: tt for tt in all_query(TidemarkType)}
-scores_pickle_path = os.path.join(data_file_dir, 'scores_all.pickle')
-pickle_path = os.path.join(data_file_dir, 'believability.pickle')
+class TidemarkPipeline():
+    tt_map = {tt.id: tt for tt in all_query(TidemarkType)}
+    scores_pickle_path = os.path.join(data_file_dir, 'scores_all.pickle')
+    pickle_path = os.path.join(data_file_dir, 'believability.pickle')
 
+    tm_id_map = {i:tm.tidemark for i, tm in tidemark_map.items()}
+    id_tm_map = {tm:i for i, tm in tm_id_map.items()}
 
-tm_id_map = {i:tm.tidemark for i, tm in tidemark_map.items()}
-id_tm_map = {tm:i for i, tm in tm_id_map.items()}
+    def __init__(self, asset: Asset, debug: bool = False):
+        self.asset = asset
+        self.debug = debug
+        logger.info(f"Debug set to {debug}.")
 
+    def format_tidemarks(self, tidemarks_collection: list)->pd.DataFrame:
+        """Format the tidemarks.
 
-def format_tidemarks(asset: Asset, tidemarks_collection: list)->pd.DataFrame:
-    """Format the tidemarks.
+        Parameter
+        ---------
+        tidemarks_day: list 
+            list of elements from an `asset`.`tidemark_history_qtrly` collection.
 
-    Parameter
-    ---------
-    tidemarks_day: list 
-        list of elements from an `asset`.`tidemark_history_qtrly` collection.
+        Returns
+        -------
+        df: pd.DataFrame
+            formatted dataframe for use in the `get_scores` function.
+        """
+        a = self.asset
+        if not tidemarks_collection:
+            logger.warn(f"No tidemarks for [{a.id} - {a.asset}]. "
+                        + "Returning empty dataframe")
+            return pd.DataFrame()
 
-    Returns
-    -------
-    tidemarks_df: pd.DataFrame
-        formatted dataframe for use in the `get_scores` function.
-    """
+        df = to_df(tidemarks_collection)[['value']].unstack('tidemark_id')\
+                                                    .droplevel(axis=1, level=0)
+        df = df.reorder_levels(['asset_id','date'])
+        for d in pd.date_range(start=df.index.levels[1].max(), 
+                            end=dt.date.today() + pd.offsets.QuarterEnd(n=0), 
+                            freq='Q').values[1:]:
+            df = df.reindex(df.index.insert(loc=-1, item=(a.id, d)))
+        df = df.sort_index().fillna(method='ffill')
+        logger.debug(df.index.names)
+        logger.debug(df.columns)
+        return df.rename(columns=lambda col: tidemark_map[col].tidemark, 
+                                level='tidemark_id')
 
-    if not tidemarks_collection:
-        logger.warn(f"No tidemarks for [{asset.id} - {asset.asset}]. Returning empty dataframe")
-        return pd.DataFrame()
+    def format_growth_tidemarks(self,
+                                tidemarks_collection: list)->pd.DataFrame:
+        """Format the tidemarks.
 
-    tidemarks_df = to_df(tidemarks_collection)[['value']].unstack('tidemark_id')\
-                                                   .droplevel(axis=1, level=0)
-    tidemarks_df = tidemarks_df.reorder_levels(['asset_id','date'])
-    for d in pd.date_range(start=tidemarks_df.index.levels[1].max(), 
-                           end=dt.date.today() + pd.offsets.QuarterEnd(n=0), 
-                           freq='Q').values[1:]:
-        tidemarks_df = tidemarks_df.reindex(tidemarks_df.index.insert(loc=-1, item=(asset.id, d)))
-    tidemarks_df = tidemarks_df.sort_index().fillna(method='ffill')
-    logger.debug(tidemarks_df.index.names)
-    logger.debug(tidemarks_df.columns)
-    return tidemarks_df.rename(columns=lambda col: tidemark_map[col].tidemark, 
-                               level='tidemark_id')
+        Parameter
+        ---------
+        tidemarks_day: list 
+            list of elements from an `asset`.`tidemark_history_qtrly` collection.
 
-def format_growth_tidemarks(asset: Asset, 
-                            tidemarks_collection: list, 
-                            debug: bool = False)->pd.DataFrame:
-    """Format the tidemarks.
+        Returns
+        -------
+        df: pd.DataFrame
+            formatted dataframe for use in the `get_scores` function.
+        """
+        a = self.asset
+        if not tidemarks_collection:
+            logger.warn(f"No tidemarks for [{a.id} - {a.asset}]. "
+                        + "Returning empty dataframe")
+            return pd.DataFrame()
 
-    Parameter
-    ---------
-    tidemarks_day: list 
-        list of elements from an `asset`.`tidemark_history_qtrly` collection.
+        df = to_df(tidemarks_collection)[['id','value']]
+        df['id_value'] = list(zip(df.id, df.value))
+        df = df[['id_value']].unstack('tidemark_id') \
+                            .rename(
+                                columns=lambda col: tidemark_map[col].tidemark, 
+                                level='tidemark_id')
+        df = df.reorder_levels(['asset_id','date'])
 
-    Returns
-    -------
-    tidemarks_df: pd.DataFrame
-        formatted dataframe for use in the `get_scores` function.
-    """
+        return df
 
-    if not tidemarks_collection:
-        logger.warn(f"No tidemarks for [{asset.id} - {asset.asset}]. Returning empty dataframe")
-        return pd.DataFrame()
+    def get_scores(df: pd.DataFrame, daily: False):
+        '''Return the rolling median, standard deviation and scores.
 
-    df = to_df(tidemarks_collection)[['id','value']]
-    df['id_value'] = list(zip(df.id, df.value))
-    df = df[['id_value']].unstack('tidemark_id') \
-                         .rename(columns=lambda col: tidemark_map[col].tidemark, 
-                                 level='tidemark_id')
-    df = df.reorder_levels(['asset_id','date'])
+        Parameters
+        ==========
+        df: pd.DataFrame()
+            Tidemark values with `date` type index.
+        daily: bool
+            Whether the scores are to be calculated on a daily or quarterly basis.
 
-    return df
+        Returns
+        =======
+        meds: pd.DataFrame
+            20-year rolling medians.
+        stds: pd.DataFrame
+            20-year rolling standard deviations.
+        scores: pd.DataFrame
+            Daily tidemark scores.
+        '''
+        freq_per_yr = (daily * 252) or 4
 
-def get_scores(dataframe: pd.DataFrame, daily: False):
-    '''Return the rolling median, standard deviation and scores.
+        if df.empty:
+            return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+        meds = df.rolling(window=freq_per_yr * 20, 
+                                min_periods=freq_per_yr)\
+                        .median() \
+                        .reset_index(['asset_id','date'], drop=True)
 
-    Parameters
-    ==========
-    dataframe: pd.DataFrame()
-        Tidemark values with `date` type index.
-    daily: bool
-        Whether the scores are to be calculated on a daily or quarterly basis.
+        stds = df.rolling(window=freq_per_yr * 20, 
+                                min_periods=freq_per_yr)\
+                        .std() \
+                        .reset_index(['asset_id','date'], drop=True)
 
-    Returns
-    =======
-    meds: pd.DataFrame
-        20-year rolling medians.
-    stds: pd.DataFrame
-        20-year rolling standard deviations.
-    scores: pd.DataFrame
-        Daily tidemark scores.
-    '''
-    freq_per_yr = (daily * 252) or 4
-
-    if dataframe.empty:
-        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
-    meds = dataframe.rolling(window=freq_per_yr * 20, 
-                             min_periods=freq_per_yr)\
-                    .median() \
-                    .reset_index(['asset_id','date'], drop=True)
-
-    stds = dataframe.rolling(window=freq_per_yr * 20, 
-                             min_periods=freq_per_yr)\
-                    .std() \
-                    .reset_index(['asset_id','date'], drop=True)
-
-    scores = (0.5 + (dataframe - meds) / (2 * 1.382 * stds)) \
-                    .reset_index(['asset_id','date'], drop=True)
-                    
-    return meds, stds, scores
+        scores = (0.5 + (df - meds) / (2 * 1.382 * stds)) \
+                        .reset_index(['asset_id','date'], drop=True)
+                        
+        return meds, stds, scores

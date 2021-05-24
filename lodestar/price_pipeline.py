@@ -156,6 +156,7 @@ class BuoyPipeline(Pipeline):
         price_history = sorted(self.asset.price_history_collection, 
                                key=lambda p: p.date, 
                                reverse=True)
+        # TODO: Deal with 0 price_histories.
         self.latest_price_date = price_history[0].date
         if new_asset:
             p = price_history[-1]
@@ -277,7 +278,7 @@ class DailyPipeline(Pipeline):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.price_pipeline = PricePipeline(asset=self.asset)
-        self.buoy_pipeline = BuoyPipeline(asset=self.asset, new_asset=False)
+        self.buoy_pipeline = BuoyPipeline(asset=self.asset, new_asset=True)
 
     def run_daily_procedures(self):
         self.price_pipeline.run_prices(start_date='1990-01-01')
@@ -289,3 +290,4 @@ if __name__=='__main__':
         logger.info(f"{asset.id} - {asset} Running Daily Procedures.")
         d = DailyPipeline(asset)
         d.run_daily_procedures()
+    print(f"{(time.time()-t_0)/60} mins")

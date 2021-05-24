@@ -169,7 +169,7 @@ if __name__=='__main__':
     from .database.maps import asset_map
     import time
     t_0 = time.time()
-    for asset in list(asset_map.values())[0:2]:
+    for asset in list(asset_map.values()):
         buoys, p_index = get_new_buoys(asset, audit=True)
         print(buoys.head(60))
         print(p_index.head(60))
