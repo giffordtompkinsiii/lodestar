@@ -24,12 +24,12 @@ import datetime as dt
 
 from tqdm import tqdm
 
-from .. import logger, data_file_dir
-from ..database.maps import asset_map, tidemark_map
-from ..database.models import Asset, PriceHistory, Tidemark, TidemarkType
-from ..database.functions import all_query, collection_to_dataframe as to_df
+from .. import *
+from ...database.maps import asset_map, tidemark_map
+from ...database.models import Asset, PriceHistory, Tidemark, TidemarkDaily, TidemarkType, session
+from ...database.functions import all_query, collection_to_dataframe as to_df, add_new_objects, collection_to_dataframe
 
-class TidemarkPipeline():
+class TidemarkPipeline(AssetPipeline):
     tt_map = {tt.id: tt for tt in all_query(TidemarkType)}
     scores_pickle_path = os.path.join(data_file_dir, 'scores_all.pickle')
     pickle_path = os.path.join(data_file_dir, 'believability.pickle')
@@ -38,8 +38,12 @@ class TidemarkPipeline():
     id_tm_map = {tm:i for i, tm in tm_id_map.items()}
 
     def __init__(self, asset: Asset, debug: bool = False):
+        super().__init__(asset=asset, debug=debug)
         self.asset = asset
-        self.debug = debug
+        self.daily_history = session.query(TidemarkDaily) \
+                            .filter(TidemarkDaily.price_id.in_(
+                                [p.id for p in asset.price_history_collection])
+                            ).all()
         logger.info(f"Debug set to {debug}.")
 
     def format_tidemarks(self, tidemarks_collection: list)->pd.DataFrame:
@@ -104,7 +108,7 @@ class TidemarkPipeline():
 
         return df
 
-    def get_scores(df: pd.DataFrame, daily: False):
+    def get_scores(self, df: pd.DataFrame, daily: bool = False):
         '''Return the rolling median, standard deviation and scores.
 
         Parameters
@@ -128,14 +132,14 @@ class TidemarkPipeline():
         if df.empty:
             return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
         meds = df.rolling(window=freq_per_yr * 20, 
-                                min_periods=freq_per_yr)\
-                        .median() \
-                        .reset_index(['asset_id','date'], drop=True)
+                          min_periods=freq_per_yr)\
+                 .median() \
+                 .reset_index(['asset_id','date'], drop=True)
 
         stds = df.rolling(window=freq_per_yr * 20, 
-                                min_periods=freq_per_yr)\
-                        .std() \
-                        .reset_index(['asset_id','date'], drop=True)
+                          min_periods=freq_per_yr)\
+                 .std() \
+                 .reset_index(['asset_id','date'], drop=True)
 
         scores = (0.5 + (df - meds) / (2 * 1.382 * stds)) \
                         .reset_index(['asset_id','date'], drop=True)

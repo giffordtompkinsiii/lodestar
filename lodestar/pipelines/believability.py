@@ -59,7 +59,8 @@ def get_new_believability(asset: Asset) -> pd.DataFrame:
     return b_df.reset_index(['asset_id','date'], drop=True)
 
 def get_believability(price: PriceHistory) -> pd.DataFrame:
-    logger.info(f"[{price.assets.id}] {price.assets.asset} - Collecting Tidemarks.")
+    a = price.assets
+    logger.info(f"[{a.id}] {a.asset} - Collecting Tidemarks.")
     scores_df = collection_to_dataframe([price])[['id']]
 
     daily_tm = price.tidemark_history_daily_collection
@@ -81,10 +82,9 @@ def get_believability(price: PriceHistory) -> pd.DataFrame:
     b = calc_believability(scores_df).reset_index(['asset_id','date'], drop=True)
     price.believability = b.loc[price.id, 'believability']
     price.confidence = b.loc[price.id, 'confidence']
+    logger.debug(f"{[d.__dict__ for d in price.tidemark_history_daily[0]]}")
     session.merge(price)
-    logger.info(f"[{price.assets.id}] {price.assets.asset} - Updating believability: {price.date}.")
-    session.commit()
-    session.refresh(price)
+    logger.info(f"[{a.id}] {a.asset} - Updating believability: {price.date}.")
     return price
 
 

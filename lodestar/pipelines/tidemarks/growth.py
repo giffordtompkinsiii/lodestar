@@ -1,8 +1,8 @@
 import numpy as np
 import pandas as pd
 
-from ..database.maps import tm_id_name_map, tm_name_id_map
-from ..database.models import Asset
+from ...database.maps import tm_id_name_map, tm_name_id_map
+from ...database.models import Asset
 
 def yr_growth(ratio: pd.DataFrame, n: int = 5, freq:str = 'Q'):
     """Calculate Geometric Growth 

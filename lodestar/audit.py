@@ -1,7 +1,7 @@
 import time
 from . import logger
 from .database.maps import asset_map
-from .pipelines.daily import update_old_data
+from .pipelines.daily_data import update_old_data
 
 
 if __name__=='__main__':
