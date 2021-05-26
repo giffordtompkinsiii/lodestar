@@ -7,7 +7,6 @@ from ..database.models import Asset, PriceHistory, session
 from ..database.maps import asset_map, tidemark_map
 from ..database.functions import collection_to_dataframe
 
-# Need to calculate new believabilities before importing new prices.
 # TODO: Could simply get qtrly_believability, and then join with daily_b score and take weighted average.
 
 b_map = {
