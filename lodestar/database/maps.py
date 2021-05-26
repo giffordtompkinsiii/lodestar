@@ -9,4 +9,3 @@ asset_map    = {a.id: a for a in all_query(Asset)}
 client_map   = {c.id: c for c in all_query(Client)}
 tidemark_map = {t.id: t for t in all_query(Tidemark)}
 account_type_map = {t.id: t for t in all_query(AccountType)}
-

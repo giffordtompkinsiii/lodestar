@@ -42,9 +42,10 @@ from .google import update_sheet
 from .. import logging, logger, beep
 from ..database.maps import (account_map, api_map, asset_map, 
                              client_map, account_type_map as type_map)
-from ..database.functions import on_conflict_do_nothing, on_conflict_do_update
-from ..database.models import (Account, BalanceHistory, PositionHistory, 
-                                TransactionHistory, session)
+from ..database.functions import (all_query, on_conflict_do_nothing,
+                                  on_conflict_do_update)
+from ..database.models import (Account, AlgoTrading, BalanceHistory, 
+                               PositionHistory, TransactionHistory, session)
 
 account_map = {a.account: a for a in account_map.values()}
 asset_map = {a.asset: a for a in asset_map.values()}
@@ -177,7 +178,7 @@ class IBapi(EWrapper, EClient):
         Receives the subscribed account's information. 
     """
 
-    trade_history_uk = 'position_history_account_id_api_id_ref_id_key'
+    transaction_unique_key = 'transaction_history_api_id_account_id_ref_id_key'
 
     def __init__(self):
         from ..database.models import session
@@ -196,8 +197,8 @@ class IBapi(EWrapper, EClient):
         """Check if market is closed.
         
         Returns True or False or if IBKR closing procedures have already run."""
-        utc_today = dt.datetime.utcnow()
-        market_closed = (utc_today + dt.timedelta(hours=3)).date() != utc_today
+        utc_td = dt.datetime.utcnow()
+        market_closed = (utc_td + dt.timedelta(hours=3)).date() != utc_td.date()
         if not market_closed:
             logger.info("Market is not closed.")
         else:
@@ -215,7 +216,7 @@ class IBapi(EWrapper, EClient):
             except KeyError as ke:
                 logger.warning(f"Account {account_name} does not exist in database. Please format the new account now.")
                 account = format_new_account(account_name)
-            account.pending_trades = []
+            # account.pending_trades = []
             self.accounts[account_name] = account
             logger.debug(f"Account: {account.account} formatted.")
 
@@ -301,9 +302,9 @@ class IBapi(EWrapper, EClient):
 
     def execDetailsEnd(self, reqId: int):
         """Indicates the end of the Execution reception."""
-        for a in self.accounts.values():
-            a.pending_trades = on_conflict_do_nothing(a.pending_trades, 
-                                            constraint_name=self.trade_history_uk)
+        # for a in self.accounts.values():
+        #     a.pending_trades = on_conflict_do_nothing(a.pending_trades, 
+        #                             constraint_name=self.transaction_unique_key)
         logger.info("Transactions Updated")
         if self.closing:
             self.transactions_closed = True
@@ -315,19 +316,24 @@ class IBapi(EWrapper, EClient):
             + f"Time: {execution.time}, AccountNumber: {execution.acctNumber}, "
             + f"Side: {execution.side}, Shares: {execution.shares}, "
             + f"Price: {execution.price}, TotalShares: {execution.cumQty}, "
-            + f"AvgPrice: {execution.avgPrice}")
-
+            + f"AvgPrice: {execution.avgPrice}, OrderId : {execution.orderId}")
+        ref_id_base = execution.execId.rsplit('.', maxsplit=1)[0]
         account = self.accounts[execution.acctNumber]
         sign = (-1 + 2 * (execution.side=='BOT'))
         trade = TransactionHistory(account_id=account.id,
                                    timestamp=str_to_timestamp(execution.time),
                                    asset_id=asset_map[contract.symbol].id,
                                    api_id=api_map['ibkr'].id,
-                                   ref_id=execution.execId,
-                                   price=execution.price,
+                                   ref_id=ref_id_base,
+                                   exchange=execution.exchange,
+                                   strike_price=contract.strike,
+                                #    expiration_date= NULL
+                                   option=(contract.secType!='STK'),
+                                   price=execution.avgPrice,
                                    quantity=sign * execution.shares)
         logger.debug(f"Adding {trade.__dict__} to session.")
-        account.pending_trades.append(trade)
+        on_conflict_do_update(trade, constraint_name=self.transaction_unique_key)
+        # account.pending_trades.append(trade)
 
     def closing_procedures(self):
         """Running closing procedures."""
@@ -359,6 +365,18 @@ class IBapi(EWrapper, EClient):
             self.check_connection_or_wait(ip, port, client_id)
         
 
+    # def place_orders(self):
+    #     for a in all_query(AlgoTrading):
+    #         if a.transaction != '--':
+    #             c = Contract()
+    #             c.symbol = a.asset
+    #             c.strike = a.trigger_price
+    #             o = Order()
+    #             o.account = 'U5801766'
+    #             o.action = a.transaction
+    #             o.totalQuantity = 0
+    #             self.placeOrder(a.asset_id, c, o)
+
 def run_ibkr(port: int = 7496, disconnect: bool = False, debug: bool = False):
     app = IBapi()
     logger.info("Establishing connection.")
@@ -389,13 +407,13 @@ def run_ibkr(port: int = 7496, disconnect: bool = False, debug: bool = False):
         execution_filter = ExecutionFilter()
         app.reqExecutions(reqId=9000, execFilter=execution_filter)
         time.sleep(10)
-
+        app.place_orders()
         app.initialized = True
         time.sleep(10)
 
     while not app.market_closed:
         app.market_closed = app.check_close()
-        time.sleep(2)
+        time.sleep(100)
 
     app.closing_procedures()
 
