@@ -18,6 +18,7 @@ tables : list
     table names from the database from which to make objects
 """
 import warnings
+from pandas.core.algorithms import unique
 
 from sqlalchemy.sql.expression import over
 
@@ -45,6 +46,7 @@ tables = ['accounts',
             'tidemark_types',
             'transaction_history',
             'typed_tidemarks',
+            'vw_algotrading',
             'vw_believability',
             'vw_bloomberg',
             'vw_high_watermarks',
@@ -62,6 +64,12 @@ with warnings.catch_warnings():
 Base = automap_base(metadata=metadata)
 
 ## >>> INSERT VIEW DEFINITIONS HERE
+class AlgoTrading(Base):
+    __tablename__='vw_algotrading'
+    __table_args__={'extend_existing': True}
+    asset_id = Column(Integer, ForeignKey('assets.id'), primary_key=True)
+    unique_constraint = UniqueConstraint(asset_id)
+
 class Bloomberg(Base):
     __tablename__='vw_bloomberg'
     __table_args__={'extend_existing': True}
