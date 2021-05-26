@@ -316,14 +316,18 @@ class IBapi(EWrapper, EClient):
             + f"Side: {execution.side}, Shares: {execution.shares}, "
             + f"Price: {execution.price}, TotalShares: {execution.cumQty}, "
             + f"AvgPrice: {execution.avgPrice}")
-
+        ref_id_base = execution.execId.rsplit('.', maxsplit=1)[0]
         account = self.accounts[execution.acctNumber]
         sign = (-1 + 2 * (execution.side=='BOT'))
         trade = TransactionHistory(account_id=account.id,
                                    timestamp=str_to_timestamp(execution.time),
                                    asset_id=asset_map[contract.symbol].id,
                                    api_id=api_map['ibkr'].id,
-                                   ref_id=execution.execId,
+                                   ref_id=ref_id_base,
+                                   exchange=execution.exchange,
+                                   strike_price=contract.strike,
+                                #    expiration_date= NULL
+                                   option=(contract.secType!='STK'),
                                    price=execution.price,
                                    quantity=sign * execution.shares)
         logger.debug(f"Adding {trade.__dict__} to session.")

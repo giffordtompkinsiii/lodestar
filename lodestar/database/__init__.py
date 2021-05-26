@@ -26,8 +26,13 @@ def nan_to_null(f, _NULL=psyco.AsIs('NULL'), _Float=psyco.Float):
         return _Float(f)
     return _NULL
 
-psyco.register_adapter(float, nan_to_null)
+def nat_to_null(f, _NULL=psyco.AsIs('NULL'), _Date=psyco.DATE):
+    if not np.isnat(f):
+        return _Date(f)
+    return _NULL
 
+psyco.register_adapter(float, nan_to_null)
+psyco.register_adapter(np.datetime64, nat_to_null)
 home_dir = os.environ['HOME']
 psql_root_dir = os.path.join(home_dir,'.postgresql','lodestar')
 
