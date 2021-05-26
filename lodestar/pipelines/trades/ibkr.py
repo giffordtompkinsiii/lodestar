@@ -1,18 +1,4 @@
-import os
-import argparse
-import numpy as np
-import pandas as pd
-import datetime as dt
-
-from . import logger, logging
-from .database.maps import account_map, asset_map 
-from .database.models import TransactionHistory, session
-from .database.functions import on_conflict_do_nothing
-
-account_map = {a.account: a.id for a in account_map.values()}
-asset_map = {a.asset.replace(' ','-'): a.id for a in asset_map.values()}
-
-transaction_unique_key = 'transaction_history_api_id_account_id_ref_id_key'
+from . import *
 
 use_cols = ['Header',
             'DataDiscriminator', 
@@ -33,17 +19,10 @@ import_cols = ['price',
                'ref_id',
                'expiration_date',
                'strike_price']
-
-def check_ibkr(lines):
-    return any(['Interactive Brokers' in line for line in lines])
-        
-
+  
 def import_csv(filepath):
-    p = open(filepath)
-    txt = p.read()
-    lines = txt.split('\n')
-    lines = [l.split(',') for l in lines]
-    if not check_ibkr(lines):
+    is_ibkr, lines = check_ibkr(filepath)
+    if not is_ibkr:
         logger.warning(f"{filepath} is not an Interacitve Brokers Statement. Please use appropriate processing function.")
         return pd.DataFrame()
     logger.debug("Found IBKR statement.")
@@ -80,6 +59,9 @@ def import_transactions(trades):
     return on_conflict_do_nothing(trades, constraint_name=transaction_unique_key)
 
 def process_history(filepath):
+    if not os.isfile(filepath):
+        logger.warning(f"{filepath} is a valid filepath. Please try again.")
+        return None
     logger.info(f"Importing IBKR Trades from '{os.path.basename(filepath)}'")
     df = import_csv(filepath)
     if df.empty:
@@ -87,19 +69,10 @@ def process_history(filepath):
     transactions = format_transactions(df) 
     return import_transactions(transactions)
 
-def process_filepath(filepath):
-    if os.path.isdir(filepath):
-        logger.debug(f"{filepath} is a directory. Searching for files.")
-        for _, dirs, files in os.walk(filepath):
-            for f in files:
-                process_history(os.path.join(filepath, f))
-    elif os.path.isfile(filepath):
-        process_history(filepath)
-
 if __name__=='__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('filepath')
     parser.add_argument('--debug', action='store_true')
     args = parser.parse_args()
     logger.setLevel((args.debug * logging.DEBUG) or logging.INFO)
-    process_filepath(args.filepath)
+    process_history(args.filepath)
