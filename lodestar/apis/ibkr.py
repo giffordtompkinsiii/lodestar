@@ -365,17 +365,17 @@ class IBapi(EWrapper, EClient):
             self.check_connection_or_wait(ip, port, client_id)
         
 
-    def place_orders(self):
-        for a in all_query(AlgoTrading):
-            if a.transaction != '--':
-                c = Contract()
-                c.symbol = a.asset
-                c.strike = a.trigger_price
-                o = Order()
-                o.account = 'U5801766'
-                o.action = a.transaction
-                o.totalQuantity = 0
-                self.placeOrder(a.asset_id, c, o)
+    # def place_orders(self):
+    #     for a in all_query(AlgoTrading):
+    #         if a.transaction != '--':
+    #             c = Contract()
+    #             c.symbol = a.asset
+    #             c.strike = a.trigger_price
+    #             o = Order()
+    #             o.account = 'U5801766'
+    #             o.action = a.transaction
+    #             o.totalQuantity = 0
+    #             self.placeOrder(a.asset_id, c, o)
 
 def run_ibkr(port: int = 7496, disconnect: bool = False, debug: bool = False):
     app = IBapi()
