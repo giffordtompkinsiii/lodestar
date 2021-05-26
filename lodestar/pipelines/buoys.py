@@ -140,5 +140,5 @@ class BuoyPipeline(AssetPipeline):
 
 if __name__=='__main__':
     for asset in asset_map.values():
-        b = BuoyPipeline(asset=asset, debug=True, new_asset=True)
+        b = BuoyPipeline(asset=asset, debug=False)
         b.run_buoys()

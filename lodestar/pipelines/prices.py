@@ -9,7 +9,7 @@ class PricePipeline(AssetPipeline):
         if hasattr(current_price, 'date'):
             last_date = pd.to_datetime(current_price.date) or self.date_20y_ago
         else:
-            last_date = self.date_20y_ago
+            last_date = self.date_21y_ago
         self.last_date = last_date
         logger.info(f"{self.asset.asset} last date: {self.last_date}")
         return last_date
@@ -23,8 +23,8 @@ class PricePipeline(AssetPipeline):
                                         day=self.latest_price_date.day))
         self.new_prices = None
 
-    def get_prices(self, start_date: str = None, 
-                   end_date: str = None, debug: bool = None) -> pd.DataFrame:
+    def get_prices(self, start_date: str = None, end_date: str = None, 
+                   debug: bool = None) -> List[PriceHistory]:
         """Pull prices from Yahoo!Finance for given `database.models.Asset`.
         
         Returns
@@ -46,7 +46,7 @@ class PricePipeline(AssetPipeline):
         if not a.price_history_collection and history.empty:
             logger.warning(f"No yfinance records or database records for "
                             + f"{a.asset}")
-            return pd.DataFrame()
+            return []
         
         logger.info("Sleeping for yFinance API.")
         time.sleep(1)
@@ -78,5 +78,5 @@ class PricePipeline(AssetPipeline):
 
 if __name__=='__main__':
     for asset in asset_map.values():
-        p = PricePipeline(asset, True)
+        p = PricePipeline(asset, False)
         p.run_prices()
