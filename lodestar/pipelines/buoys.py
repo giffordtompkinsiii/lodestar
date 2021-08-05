@@ -25,7 +25,9 @@ class BuoyPipeline(AssetPipeline):
         price_history = sorted(self.asset.price_history_collection, 
                                key=lambda p: p.date, 
                                reverse=True)
-        self.latest_price_date = price_history[0].date
+        self.latest_price_date = pd.to_datetime('1999-01-01')
+        if price_history:
+            self.latest_price_date = price_history[0].date
         for p in price_history:
             logger.debug(f"{p.date}")
             if p.buoy_history_collection:

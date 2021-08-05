@@ -64,6 +64,8 @@ class PricePipeline(AssetPipeline):
                          debug: bool = None) -> List[PriceHistory]:
         """Create and export new PriceHistory objects."""
         new_prices = self.get_prices(start_date, end_date, debug)
+        if not new_prices:
+            return None
         on_conflict_do_nothing(new_prices, constraint_name=self.unique_key)
         session.refresh(asset)
 

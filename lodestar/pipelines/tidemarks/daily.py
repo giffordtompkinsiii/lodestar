@@ -26,27 +26,11 @@ class DailyTidemarkPipeline(TidemarkPipeline):
 
     def __init__(self, asset:Asset, debug:bool = False):
         super().__init__(asset=asset, debug=debug)
-        self.tm_history = filter(all_query())
 
     def get_scores(self, dataframe):
         return super().get_scores(dataframe, daily=True)
 
-    def create_daily_tidemarks(self) -> pd.DataFrame:
-        """Generate the daily tidemark columns.
-
-        Parameters
-        ----------
-        price : PriceHistory
-            PriceHistory record passed from prices module.
-        """
-        a = self.asset
-        logger.debug(f"Calculating {a.asset} TidemarkDaily - {self.price.date}")
-        tidemarks = to_df(self.price.tidemark_history_collection)
-        v = tidemarks.reset_index(['date','asset_id']) \
-                     .value \
-                     .rename(index=self.tm_id_map)
-        v['price'] = float(self.price.price)
-
+    def create_tidemark_cols(self, v):
         for col_name in ['ard_preferred_stock', 
                             'bs_sh_out',
                             'cash_and_st_investments',
@@ -61,9 +45,9 @@ class DailyTidemarkPipeline(TidemarkPipeline):
                             'trail_12m_cost_of_matl',
                             'trail_12m_minority_int',
                             'trail_12m_net_inc_avai_com_share']:
-            if col_name not in v.index:
+            if col_name not in v.columns:
                 v[col_name] = np.nan
-                logger.warning(f"{a.asset} missing {col_name}.")
+                logger.debug(f"{self.asset.asset} missing {col_name}.")
 
         daily_tm = pd.Series(dtype='float', name='value')
 
@@ -97,55 +81,113 @@ class DailyTidemarkPipeline(TidemarkPipeline):
                                                 - v.cf_cap_expend_inc_fix_asset \
                                                 - v.net_chng_lt_debt) or np.nan)
         daily_tm['px_to_sales_ratio'] = v.price / (v.sales_rev_turn or np.nan)
-        daily_tm = daily_tm.rename(self.id_tm_map) \
+        daily_tm['price_id'] = v.id
+        daily_tm = daily_tm.rename(self.id_tm_map, errors='ignore') \
                            .rename_axis('tidemark_id') \
                            .reset_index()
         return daily_tm 
 
-    def get_daily_tidemark_objects(self) -> bool:
-        if not self.price.tidemark_history_collection:
-            return False
-        daily_tm = self.create_daily_tidemarks()
-        daily_tm_objs = [TidemarkDaily(price_id=self.price.id, **d._asdict()) \
+    def create_daily_tidemarks_by_asset(self) -> pd.DataFrame:
+        """Generate the daily tidemark columns.
+
+        Parameters
+        ----------
+        price : PriceHistory
+            PriceHistory record passed from prices module.
+        """
+        a = self.asset
+        logger.debug(f"Calculating {a.asset} TidemarkDaily")
+        tidemarks = to_df(a.tidemark_history_collection).value
+        prices = to_df(a.price_history_collection)
+        v = prices.join(tidemarks.unstack()) \
+                  .fillna(method='ffill') \
+                  .rename(columns=self.tm_id_map)
+        return self.create_tidemark_cols(v)
+
+
+    def create_daily_tidemarks(self, price:PriceHistory) -> pd.DataFrame:
+        """Generate the daily tidemark columns.
+
+        Parameters
+        ----------
+        price : PriceHistory
+            PriceHistory record passed from prices module.
+        """
+        a = self.asset
+        logger.debug(f"Calculating {a.asset} TidemarkDaily - {price.date}")
+        tidemarks = to_df(price.tidemark_history_collection)
+        v = tidemarks.reset_index(['date','asset_id']) \
+                     .value \
+                     .rename(index=self.tm_id_map)
+        v['price'] = float(price.price)
+        v['id'] = price.id
+        return v
+        # return self.create_tidemark_cols(v)
+
+    def get_daily_tidemark_objects_by_asset(self) -> bool:
+        daily_tm = self.create_daily_tidemarks_by_asset()
+        daily_tm_objs = [TidemarkDaily(**d._asdict()) \
                             for d in daily_tm.itertuples(index=False) \
                                 if not np.isnan(d.value)]
-        self.price.tidemark_history_daily_collection = daily_tm_objs
-        session.add(self.price)
+        session.add_all(daily_tm_objs)
+        return daily_tm_objs
+
+    def get_daily_tidemark_objects(self, price: PriceHistory) -> bool:
+        daily_tm = self.create_daily_tidemarks(price)
+        daily_tm_objs = [TidemarkDaily(price_id=price.id, **d._asdict()) \
+                            for d in daily_tm.itertuples(index=False) \
+                                if not np.isnan(d.value)]
+        price.tidemark_history_daily_collection = daily_tm_objs
+        session.merge(price)
+        return price
 
     def get_tm_history(self):
-        a = self.price.assets
-        tm_history = session.query(TidemarkDaily) \
+        a = self.asset
+        self.tm_history = session.query(TidemarkDaily) \
                             .filter(TidemarkDaily.price_id.in_(
                                 [p.id for p in a.price_history_collection])) \
                             .all()
-        return tm_history
+        return self.tm_history
 
-    def get_daily_scores(self):
-        self.get_daily_tidemark_objects()
+    def get_daily_scores_by_asset(self):
+        self.get_daily_tidemark_objects_by_asset()
         tm_history = self.get_tm_history()
 
+    def get_daily_scores(self, by_asset: bool = False):
+        updatable_prices = sorted(
+                            filter(lambda p: not bool(p.believability),
+                                self.asset.price_history_collection),
+                            key = lambda p: p.date)
+        if by_asset:
+            self.get_daily_tidemark_objects_by_asset()
+        else:
+            for p in updatable_prices:
+                if not p.tidemark_history_collection:
+                    logger.debug(f"Price already has believability. If you wish " 
+                            + "to recalculate, specify `audit` parameter.")
+                    continue
+                updatable_prices.append(self.get_daily_tidemark_objects(p))
+        tm_history = self.get_tm_history()
         if tm_history:
             prices = to_df(self.asset.price_history_collection)
             tm_df = to_df(tm_history)
             full_df = prices.join(tm_df.unstack('tidemark_id').value, on='id') \
                             .set_index('id', append=True)
             meds, stds, scores = self.get_scores(full_df)
-
-            for d in self.price.tidemark_history_daily_collection:
-                d.med_20y = meds.loc[d.price_id, d.tidemark_id]
-                d.std_20y = stds.loc[d.price_id, d.tidemark_id]
-                d.score = scores.loc[d.price_id, d.tidemark_id]
-                logger.debug(d.__dict__)
-                session.merge(d)
-            # Calculate the new believability before committing
-            self.price = get_believability(self.price)
+            for price in updatable_prices:
+                for d in price.tidemark_history_daily_collection:
+                    d.med_20y = meds.loc[d.price_id, d.tidemark_id]
+                    d.std_20y = stds.loc[d.price_id, d.tidemark_id]
+                    d.score = scores.loc[d.price_id, d.tidemark_id]
+                    logger.debug(d.__dict__)
+                    session.merge(d)
+                # Calculate the new believability before committing
+                price = get_believability(price)
 
 if __name__=='__main__':
     for asset in asset_map.values():
-        prices = sorted(asset.price_history_collection, key=lambda p: p.date)
-        for p in prices:
-            tm = DailyTidemarkPipeline(p, debug=True)
-            df = tm.get_daily_scores()
-        logger.info("Committing Believabilities and tidemarks to database.")
-        session.commit()
-        session.refresh(asset)
+        d = DailyTidemarkPipeline(asset, debug=True)
+        d.get_daily_scores(by_asset=True)
+        # logger.info("Committing Believabilities and tidemarks to database.")
+        # session.commit()
+        # session.refresh(asset)
