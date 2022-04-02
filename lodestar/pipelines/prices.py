@@ -1,6 +1,30 @@
-from . import *
+import time
+import pandas as pd
+import datetime as dt
+import yfinance as yf
+
+from typing import List
+from . import (AssetPipeline, logger, Asset, PriceHistory, 
+on_conflict_do_nothing, session, asset_map)
 
 class PricePipeline(AssetPipeline):
+    """PricePipeline imports new prices for given asset
+    
+    This pipeline pulls data from the YahooDailyReader API and import it into the price_history table.
+
+    Attributes
+    ==========
+    unique_key : str
+        The index name for the unique date-asset combination.
+
+    Methods
+    =======
+    get_last_date(): dt.datetime
+        Returns the date of the most recent record in the price hisory table for 
+        the given asset.
+    get_price(): List[prices]
+        Pull prices from Yahoo!Finance for given `database.models.Asset`.
+    """
     unique_key = 'price_history_asset_id_date_key'
 
     def get_last_date(self):

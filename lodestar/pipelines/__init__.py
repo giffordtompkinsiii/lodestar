@@ -21,7 +21,7 @@ class AssetPipeline(object):
     logger.debug(f"End of day: {end_of_day}")
     logger.debug(f"20 years ago: {date_21y_ago}")
 
-    def __init__(self, asset:Asset, debug:bool = False):
+    def __init__(self, asset:Asset, debug:bool=False):
         self.asset = asset 
         self.debug = debug 
         logger.setLevel((debug * logging.DEBUG) or logging.INFO)

@@ -60,7 +60,5 @@ if __name__=='__main__':
     t_0 = time.time()
     for a, asset in asset_map.items():
         logger.info(f"{asset.id} - {asset} Running Daily Procedures.")
-        d = DailyPipeline(asset)
+        d = EndOfDayPipeline(asset)
         d.run_daily_procedures()
-
-
