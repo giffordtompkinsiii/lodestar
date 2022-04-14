@@ -25,7 +25,7 @@ import multiprocessing as mp
 from tqdm import tqdm
 from sqlalchemy import exists
 
-from ..tidemarks.growth import calculate_growth_tidemarks
+from ..pipelines.tidemarks.growth import calculate_growth_tidemarks
 
 from .. import logger, data_file_dir
 from ..database.maps import asset_map, tm_name_id_map

@@ -1,7 +1,15 @@
 from . import *
+from dateutil.relativedelta import relativedelta
 
 class BuoyPipeline(AssetPipeline):
-    """AssetPipeline for calcualting buoy history for new prices."""
+    """AssetPipeline for calculating buoy history for new prices.
+    
+    Attributes
+    ==========
+    
+    Methods
+    =======
+    """
     per_cols = {'mo_01': 21, 
                 'mo_06': 126, 
                 'yr_01': 252, 
@@ -22,16 +30,28 @@ class BuoyPipeline(AssetPipeline):
 
     def __init__(self, asset: Asset, debug: bool = False):
         super().__init__(asset, debug)
+        # Pull the price history of the asset and sort in reverse-date order.
         price_history = sorted(self.asset.price_history_collection, 
                                key=lambda p: p.date, 
                                reverse=True)
-        self.latest_price_date = pd.to_datetime('1999-01-01')
-        if price_history:
+        
+        # Create default latest date. 
+        # TODO: Is this best? Should it be a moving date?
+        self.latest_price_date = (dt.date.today() - relativedelta(years=20))
+
+        # Try to set the latest price date.
+        try:
             self.latest_price_date = price_history[0].date
+        except:
+            logger.warning(f"{asset.asset} has no price history. Import price history to get price movement.")
+            return
+
+        # Loop through price history in reverse order looking for latest record with a buoy history.
         for p in price_history:
             logger.debug(f"{p.date}")
             if p.buoy_history_collection:
                 break
+        
         self.buoy_data_start = pd.to_datetime(
                                     dt.date(year=p.date.year - 30, 
                                             month=p.date.month, 
@@ -143,4 +163,5 @@ class BuoyPipeline(AssetPipeline):
 if __name__=='__main__':
     for asset in asset_map.values():
         b = BuoyPipeline(asset=asset, debug=False)
-        b.run_buoys()
+        if b.asset.price_history_collection:
+            b.run_buoys()

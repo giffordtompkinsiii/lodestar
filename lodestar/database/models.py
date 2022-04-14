@@ -85,23 +85,36 @@ class CurrentBelievability(Base):
     date = Column(Date, primary_key=True)
     unique_constraint = UniqueConstraint(asset_id, date)
 
-class LowWatermark(Base):
-    __tablename__='vw_low_watermark'
+class Watermark(Base):
+    __tablename__='vw_watermarks'
     __table_args__={'extend_existing': True}
     asset_id = Column(Integer, ForeignKey('assets.id'), primary_key=True)
     date = Column(Date, primary_key=True)
     high_mark = Column(Boolean, primary_key=True)
     day_mvmt = Column(Integer, primary_key=True)
-    unique_constraint = UniqueConstraint(asset_id, date, high_mark, day_mvmt)
+    unique_constraint = UniqueConstraint(asset_id, 
+                                         date, 
+                                         high_mark,
+                                         day_mvmt)
 
-class HighWatermark(Base):
-    __tablename__='vw_high_watermark'
-    __table_args__={'extend_existing': True}
-    asset_id = Column(Integer, ForeignKey('assets.id'), primary_key=True)
-    date = Column(Date, primary_key=True)
-    high_mark = Column(Boolean, primary_key=True)
-    day_mvmt = Column(Integer, primary_key=True)
-    unique_constraint = UniqueConstraint(asset_id, date, high_mark, day_mvmt)
+
+# class LowWatermark(Watermark):
+#     __tablename__='vw_low_watermarks'
+#     asset_id = Column(Integer, 
+#                       ForeignKey('vw_watermarks.asset_id'), 
+#                       primary_key=True)
+#     date = Column(Date, primary_key=True)
+#     high_mark = Column(Boolean, primary_key=True)
+#     day_mvmt = Column(Integer, primary_key=True)
+#     unique_constraint = UniqueConstraint(Watermark.asset_id, 
+#                                          Watermark.date, 
+#                                          Watermark.day_mvmt)
+
+# class HighWatermark(Watermark):
+#     __tablename__='vw_high_watermarks'
+#     unique_constraint = UniqueConstraint(Watermark.asset_id, 
+#                                          Watermark.date, 
+#                                          Watermark.day_mvmt)
 
 def name_for_collection_relationship(base, local_cls, referred_cls, constraint):
     reflexive_names = {
@@ -163,6 +176,7 @@ Account.current_balance = relationship(
     #                             primaryjoin=(
     #                                 (Account.id==PositionHistory.account_id) & PositionHistory.active)
     # )
+
 # Instantiate a session for querying.
 Session = sessionmaker()
 session = Session(bind=engine, expire_on_commit=False)
@@ -278,14 +292,14 @@ if __name__=='__main__':
 #     mvmt_int_days = Column(Integer, primary_key=True)
 #     unique_constraint = UniqueConstraint(asset_id, date, pop, mvmt_int_days)    
 
-# class TradeLog(Base):
-#     __tablename__='vw_trade_log'
-#     __table_args__={'extend_existing': True}
-#     asset = Column(Text, ForeignKey('assets.asset'), primary_key=True)
-#     account_id = Column(Text, ForeignKey('accounts.id'), primary_key=True)
-#     api = Column(Text, ForeignKey('apis.api'), primary_key=True)
-#     timestamp = Column(DateTime, primary_key=True)
-#     unique_constraint = UniqueConstraint(account_id, api, asset, timestamp) 
+class TradeLog(Base):
+    __tablename__='vw_trade_log'
+    __table_args__={'extend_existing': True}
+    asset = Column(Text, ForeignKey('assets.asset'), primary_key=True)
+    account_id = Column(Text, ForeignKey('accounts.id'), primary_key=True)
+    api = Column(Text, ForeignKey('apis.api'), primary_key=True)
+    timestamp = Column(DateTime, primary_key=True)
+    unique_constraint = UniqueConstraint(account_id, api, asset, timestamp) 
 
 
 ## TABLE IMPORTS

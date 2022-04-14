@@ -26,7 +26,8 @@ from tqdm import tqdm
 
 from .. import *
 from ...database.maps import asset_map, tidemark_map
-from ...database.models import Asset, PriceHistory, Tidemark, TidemarkDaily, TidemarkType, session
+from ...database.models import (Asset, PriceHistory, Tidemark, TidemarkDaily, 
+                                TidemarkType, session)
 from ...database.functions import all_query, collection_to_dataframe as to_df, add_new_objects, collection_to_dataframe
 
 class TidemarkPipeline(AssetPipeline):

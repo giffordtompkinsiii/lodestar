@@ -1,3 +1,4 @@
+from distutils.log import debug
 import time
 import pandas as pd
 import datetime as dt
@@ -38,7 +39,7 @@ class PricePipeline(AssetPipeline):
         logger.info(f"{self.asset.asset} last date: {self.last_date}")
         return last_date
 
-    def __init__(self, asset: Asset, debug: bool):
+    def __init__(self, asset: Asset, debug: bool=debug):
         super().__init__(asset=asset, debug=debug)
         self.latest_price_date = self.get_last_date()
         self.price_data_start = pd.to_datetime(
@@ -89,12 +90,13 @@ class PricePipeline(AssetPipeline):
         """Create and export new PriceHistory objects."""
         new_prices = self.get_prices(start_date, end_date, debug)
         if not new_prices:
-            return None
+            return self.asset.current_price
         on_conflict_do_nothing(new_prices, constraint_name=self.unique_key)
-        session.refresh(asset)
+        session.refresh(self.asset)
+        return self.asset.current_price
 
     def __repr__(self):
-        repr_str = f"{self.__class__.name}(Asset: '{self.asset.asset}', " \
+        repr_str = f"{self.__class__}(Asset: '{self.asset.asset}', " \
                     + f"last_date: '{str(self.last_date.date())}', " \
                     + f"data_start': '{str(self.price_data_start.date())}', " \
                     + f"new_prices: {len(self.new_prices or [])} records, " \

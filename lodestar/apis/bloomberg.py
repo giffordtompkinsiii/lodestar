@@ -12,7 +12,6 @@ Steps
 5. Pull values for growth tidemarks and store those in database as well.
 
 """
-from lodestar import tidemarks
 import os
 import time
 import pickle

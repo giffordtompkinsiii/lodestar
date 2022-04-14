@@ -12,17 +12,28 @@ from typing import List
 
 from . import *
 from ..believability import get_believability
-from ...database.models import TidemarkDaily
+from ...database.models import TidemarkDaily, TidemarkHistory
+from ..prices import PricePipeline
 
 pd.options.mode.chained_assignment = None  # default='warn'
 
-# TODO: Convert this to go by asset with methods taht work by price_record.
+class DailyTidemarkByAsset(PricePipeline, TidemarkPipeline):
+    daily_cols = {term.id: term for terms in [
+            getattr(tm, 'terms_collection', []) for tm in all_query(Tidemark) \
+                if tm.daily
+        ] for term in terms
+    }
+    def __init__(self, asset:Asset, debug:bool = False):
+        super(DailyTidemarkByAsset, self).__init__(asset=asset, debug=debug)
+
+# TODO: Convert this to go by asset with methods that work by price_record.
 class DailyTidemarkPipeline(TidemarkPipeline):
     daily_cols = {term.id: term for terms in [
             getattr(tm, 'terms_collection', []) for tm in all_query(Tidemark) \
                 if tm.daily
         ] for term in terms
     }
+    # unique_key = 
 
     def __init__(self, asset:Asset, debug:bool = False):
         super().__init__(asset=asset, debug=debug)

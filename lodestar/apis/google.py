@@ -25,6 +25,14 @@ main(sheet_title)->str
 """
 from __future__ import print_function
 
+import os.path
+
+from google.auth.transport.requests import Request
+from google.oauth2.credentials import Credentials
+from google_auth_oauthlib.flow import InstalledAppFlow
+from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
+
 import os
 import pickle
 import numpy as np
@@ -89,22 +97,19 @@ class GoogleConfig(object):
         drive_api_url = 'https://developers.google.com/drive/api/v3/quickstart/python'
 
         if os.path.exists(self.token_path):
-            with open(self.token_path, 'rb') as token:
-                creds = pickle.load(token)
+            creds = Credentials.from_authorized_user_file(self.token_path, 
+                                                          self.SCOPES)
         # If there are no (valid) credentials available, let the user log in.
         if not creds or not creds.valid:
             if creds and creds.expired and creds.refresh_token:
                 creds.refresh(Request())
             else:
-                while not os.path.exists(self.creds_path):
-                    print(f"Please proceed to the following site to download credentials: \n {drive_api_url}")
-                    input(f"Save the credentials as {self.creds_path}")
-
-                flow = InstalledAppFlow.from_client_secrets_file(self.creds_path, self.SCOPES)
+                flow = InstalledAppFlow.from_client_secrets_file(self.creds_path, 
+                                                                 self.SCOPES)
                 creds = flow.run_local_server(port=0)
             # Save the credentials for the next run
-            with open(self.token_path, 'wb') as token:
-                pickle.dump(creds, token)
+            with open(self.token_path, 'w') as token:
+                token.write(creds.to_json())
         self.creds = creds
 
     def create_sheets_service(self):
