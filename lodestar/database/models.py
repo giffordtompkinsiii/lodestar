@@ -70,6 +70,15 @@ class AlgoTrading(Base):
     asset_id = Column(Integer, ForeignKey('assets.id'), primary_key=True)
     unique_constraint = UniqueConstraint(asset_id)
 
+# class BloombergTidemark(Base):
+#     __tablename__='bloomberg_tidemarks'
+#     __table_args__={'extend_existing': True}
+#     asset_id = Column(Integer, ForeignKey('assets.id'), primary_key=True)
+#     tidemark_id = Column(Integer, ForeignKey('tidemarks.id'), primary_key=True)
+#     date = Column(Date)
+#     unique_constraint = UniqueConstraint(asset_id, tidemark_id, date)
+
+
 class Bloomberg(Base):
     __tablename__='vw_bloomberg'
     __table_args__={'extend_existing': True}
@@ -145,6 +154,7 @@ AccountType = Base.classes.account_types
 Api = Base.classes.apis
 Asset = Base.classes.assets
 BalanceHistory = Base.classes.balance_history
+# BloombergTidemark = Base.classes.bloomberg_tidemarks
 BuoyHistory = Base.classes.buoy_history
 Client = Base.classes.clients
 PositionHistory = Base.classes.position_history
@@ -155,7 +165,12 @@ TidemarkHistory = Base.classes.tidemark_history
 TidemarkType = Base.classes.tidemark_types
 TransactionHistory = Base.classes.transaction_history
 
-
+class BloombergTidemark(Base):
+    __tablename__ = 'bloomberg_tidemarks'
+    __table_args__={'extend_existing': True}
+    asset_id = Column(Integer, primary_key=True)
+    tidemark_id = Column(Integer, primary_key=True)
+    date = Column(Integer, primary_key=True)
 
 ## CUSTOM RELATIONSHIP DEFINITIONS
 Asset.current_price = relationship(PriceHistory,

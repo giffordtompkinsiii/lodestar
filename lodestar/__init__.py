@@ -2,9 +2,9 @@ import logging
 import sys
 import os
 from logging.handlers import TimedRotatingFileHandler
-
-tools_dir = os.environ['TTG_TOOLS_DIRECTORY']
-data_file_dir = os.environ['TTG_DATA_DIRECTORY']
+# TODO: remove these and set-up default variables.
+tools_dir = "C:\\Users\\Leon Tompkins\\tools" #os.environ['TTG_TOOLS_DIRECTORY']
+data_file_dir = "C:\\Users\\Leon Tompkins\\tools" #os.environ['TTG_DATA_DIRECTORY']
 
 log_format = "%(asctime)s |%(levelname)s| %(module)s: %(lineno)d | %(message)s"
 formatter = logging.Formatter(log_format)

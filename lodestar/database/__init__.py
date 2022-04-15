@@ -33,38 +33,46 @@ def nat_to_null(f, _NULL=psyco.AsIs('NULL'), _Date=psyco.DATE):
 
 psyco.register_adapter(float, nan_to_null)
 psyco.register_adapter(np.datetime64, nat_to_null)
-home_dir = os.environ['HOME']
+home_dir = os.environ['HOMEPATH']
 psql_root_dir = os.path.join(home_dir,'.postgresql','lodestar')
 
-connect_args = {
-    'sslmode': 'verify-ca',
-    'sslcert': os.path.join(psql_root_dir, 'postgres.crt'),
-    'sslkey': os.path.join(psql_root_dir, 'postgres.key'),
-    'sslrootcert': os.path.join(psql_root_dir, 'root.crt'),
-    'connect_timeout': 5400
-}
+# connect_args = {
+#     'sslmode': 'verify-ca',
+#     'sslcert': os.path.join(psql_root_dir, 'postgres.crt'),
+#     'sslkey': os.path.join(psql_root_dir, 'postgres.key'),
+#     'sslrootcert': os.path.join(psql_root_dir, 'root.crt'),
+#     'connect_timeout': 5400
+# }
 
 def formatting_proxy(home_directory):
     logger.info("Formatting proxy")
     proxy_str = os.path.join(home_directory,"cloud_sql_proxy") 
     proxy_dir = os.path.join(home_directory,"cloudsql")
     instances = "lodestar:us-central1:tidesgroup"
-    username = os.environ['TTG_USERNAME'] or input("Username: ")
-    password = os.environ['TTG_PASSWORD'] or input("Password: ")
+    try:
+        username = os.environ['TTG_USERNAME'] 
+    except: 
+        username = 'postgres'# input("Username: ")
+    try:
+        password = os.environ['TTG_PASSWORD'] 
+    except:
+        password = '77Tides77' # input("Password: ")
 
     from sqlalchemy.engine.url import URL
     url = URL(
         drivername="postgresql+psycopg2",
         username=username,
         password=password,
-        host=os.path.join(proxy_dir, instances),
-        port=5432,
+        host='127.0.0.1',
+        port=3306,
         database="datahull",
     )
     return url
 
 url = formatting_proxy(home_dir)
-engine = create_engine(url, connect_args=connect_args)
+engine = create_engine(url, 
+                    #    connect_args=connect_args
+                    )
 metadata = MetaData(bind=engine, 
                     schema='financial'
                     )
