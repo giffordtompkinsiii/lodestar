@@ -1,5 +1,5 @@
 from multiprocessing.context import assert_spawning
-from numpy import insert
+from numpy import full, insert
 from lodestar.database.maps import asset_map 
 from lodestar.database import engine
 import pandas as pd
@@ -17,10 +17,15 @@ def camel_to_snake(name):
 
 def refresh_assets_table():
     full_ticker_info = []
-    for i, asset in enumerate(tqdm(assets[0:200])):
+    for i, asset in enumerate(tqdm(assets[0:10])):
         ticker_info = get_ticker_info(asset)
         full_ticker_info.append(ticker_info)
-    insert_asset_info(full_ticker_info, 'replace')
+    try:
+        insert_asset_info(full_ticker_info, 'replace')
+    except:
+        pass
+    finally:
+        return full_ticker_info
 
 def add_new_asset(asset_symbol:str, if_exists='append'):
     ticker_info = get_ticker_info(asset_symbol)
@@ -54,4 +59,4 @@ def main():
             add_new_asset(asset, 'replace')
 
 if __name__=='__main__':
-    refresh_assets_table()
+    full_ticker_info = refresh_assets_table()
