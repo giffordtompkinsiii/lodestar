@@ -44,9 +44,11 @@ class BuoyPipeline(AssetPipeline):
             self.latest_price_date = price_history[0].date
         except:
             logger.warning(f"{asset.asset} has no price history. Import price history to get price movement.")
-            return
+            self.latest_price_date = dt.date.today()
 
         # Loop through price history in reverse order looking for latest record with a buoy history.
+        p = PriceHistory()
+        p.date = dt.date.today()
         for p in price_history:
             logger.debug(f"{p.date}")
             if p.buoy_history_collection:
@@ -75,7 +77,7 @@ class BuoyPipeline(AssetPipeline):
                                          self.asset.price_history_collection))
         prices = self.price_history
         price_df = collection_to_dataframe(prices).reset_index('asset_id')
-
+        
         # Filter by price records without buoy collections
         self.price_date_index = price_df.sort_index()[self.last_buoy_date:] \
                                         .iloc[1:].id
@@ -85,6 +87,9 @@ class BuoyPipeline(AssetPipeline):
     def build_mvmt_dataframe(self):
         """Build all the relevant columns for buoy dataframe."""
         prices = self.get_price_history()
+
+        if prices.empty:
+            return None
 
         mvmt_df = pd.DataFrame({
             interval: prices.pct_change(periods=interval).rename(interval) \
@@ -96,6 +101,10 @@ class BuoyPipeline(AssetPipeline):
     def build_water_marks(self):
         """Build historical high-low water mark table."""
         mvmt_df = self.build_mvmt_dataframe()
+
+        if mvmt_df.empty:
+            return None
+
         high_marks = pd.DataFrame(index=mvmt_df.stack().index)
         low_marks = pd.DataFrame(index=mvmt_df.stack().index)
 
@@ -126,6 +135,9 @@ class BuoyPipeline(AssetPipeline):
         # if hasattr(self,'buoy_objects'):
         #     return self.buoy_objects
         marks = self.build_water_marks()
+        print(marks)
+        if marks.empty:
+            return None
 
         if self.up_to_date:
             logger.info(f"'{self.asset.asset}' BuoyHistory is up-to-date.")
@@ -161,7 +173,8 @@ class BuoyPipeline(AssetPipeline):
         return pd.DataFrame()
 
 if __name__=='__main__':
-    for asset in asset_map.values():
+    for i, asset in enumerate(sorted(asset_map.values(), key=lambda a: a.asset)):
+        print(i, asset.asset)
         b = BuoyPipeline(asset=asset, debug=False)
-        if b.asset.price_history_collection:
+        if len(b.asset.price_history_collection) > 0:
             b.run_buoys()

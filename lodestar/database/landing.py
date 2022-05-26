@@ -22,35 +22,44 @@ from pandas.core.algorithms import unique
 
 from sqlalchemy.sql.expression import over
 
-from . import engine, metadata, logger
+from . import (engine, 
+                # metadata, 
+                logger)
 
 from sqlalchemy import (Boolean, Column, Date, DateTime, ForeignKey, Float, 
                         Integer, Text, UniqueConstraint, exc as sa_exc)
 from sqlalchemy.orm import sessionmaker, relationship
 from sqlalchemy.ext.automap import automap_base
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy import MetaData
 
+metadata = MetaData(bind=engine, 
+                    schema='landing'
+                    )
 
-tables = ['accounts',
-            'account_types',
-            'apis',
+tables = [
+    # 'accounts',
+    #         'account_types',
+    #         'apis',
             'assets',
-            'balance_history',
-            'buoy_history',
-            'clients',
-            'position_history',
+            # 'balance_history',
+            # 'buoy_history',
+            # 'clients',
+            # 'position_history',
             'price_history',
             'tidemarks',
             'tidemark_history',
             'tidemark_history_daily',
-            'tidemark_terms',
-            'tidemark_types',
-            'transaction_history',
-            'typed_tidemarks',
-            'vw_algotrading',
-            'vw_believability',
-            'vw_bloomberg',
-            'vw_high_watermarks',
-            'vw_low_watermarks']
+            # 'tidemark_terms',
+            # 'tidemark_types',
+            # 'transaction_history',
+            # 'typed_tidemarks',
+            # 'vw_algotrading',
+            # 'vw_believability',
+            # 'vw_bloomberg',
+            # 'vw_high_watermarks',
+            # 'vw_low_watermarks'
+            ]
 
 # Extract MetaData and create tables from them using AutoMap.
 with warnings.catch_warnings():
@@ -64,65 +73,65 @@ with warnings.catch_warnings():
 Base = automap_base(metadata=metadata)
 
 ## >>> INSERT VIEW DEFINITIONS HERE
-class AlgoTrading(Base):
-    __tablename__='vw_algotrading'
-    __table_args__={'extend_existing': True}
-    asset_id = Column(Integer, ForeignKey('assets.id'), primary_key=True)
-    unique_constraint = UniqueConstraint(asset_id)
+# class AlgoTrading(Base):
+#     __tablename__='vw_algotrading'
+#     __table_args__={'extend_existing': True}
+#     asset_id = Column(Integer, ForeignKey('assets.id'), primary_key=True)
+#     unique_constraint = UniqueConstraint(asset_id)
 
-class Bloomberg(Base):
-    __tablename__='vw_bloomberg'
-    __table_args__={'extend_existing': True}
-    asset_id = Column(Integer, ForeignKey('assets.id'), primary_key=True)
-    tidemark_id = Column(Integer, ForeignKey('tidemarks.id'), primary_key=True)
-    unique_constraint = UniqueConstraint(asset_id, tidemark_id)
-
-
-class CurrentBelievability(Base):
-    __tablename__='vw_believability'
-    __table_args__ = {'extend_existing': True}
-    asset_id = Column(Integer, ForeignKey('assets.id'), primary_key=True)
-    date = Column(Date, primary_key=True)
-    unique_constraint = UniqueConstraint(asset_id, date)
-
-class Watermark(Base):
-    __tablename__='vw_watermarks'
-    __table_args__={'extend_existing': True}
-    asset_id = Column(Integer, ForeignKey('assets.id'), primary_key=True)
-    date = Column(Date, primary_key=True)
-    high_mark = Column(Boolean, primary_key=True)
-    day_mvmt = Column(Integer, primary_key=True)
-    unique_constraint = UniqueConstraint(asset_id, 
-                                         date, 
-                                         high_mark,
-                                         day_mvmt)
+# class Bloomberg(Base):
+#     __tablename__='vw_bloomberg'
+#     __table_args__={'extend_existing': True}
+#     asset_id = Column(Integer, ForeignKey('assets.id'), primary_key=True)
+#     tidemark_id = Column(Integer, ForeignKey('tidemarks.id'), primary_key=True)
+#     unique_constraint = UniqueConstraint(asset_id, tidemark_id)
 
 
-class LowWatermark(Watermark):
-    __tablename__='vw_low_watermarks'
-    __table_args__={'extend_existing': True}
-    asset_id = Column(Integer, 
-                      ForeignKey('vw_watermarks.asset_id'), 
-                      primary_key=True)
-    date = Column(Date, primary_key=True)
-    high_mark = Column(Boolean, primary_key=True)
-    day_mvmt = Column(Integer, primary_key=True)
-    unique_constraint = UniqueConstraint(asset_id, 
-                                         date, 
-                                         day_mvmt)
+# class CurrentBelievability(Base):
+#     __tablename__='vw_believability'
+#     __table_args__ = {'extend_existing': True}
+#     asset_id = Column(Integer, ForeignKey('assets.id'), primary_key=True)
+#     date = Column(Date, primary_key=True)
+#     unique_constraint = UniqueConstraint(asset_id, date)
 
-class HighWatermark(Watermark):
-    __tablename__='vw_high_watermarks'
-    __table_args__={'extend_existing': True}
-    asset_id = Column(Integer, 
-                      ForeignKey('vw_watermarks.asset_id'), 
-                      primary_key=True)
-    date = Column(Date, primary_key=True)
-    high_mark = Column(Boolean, primary_key=True)
-    day_mvmt = Column(Integer, primary_key=True)
-    unique_constraint = UniqueConstraint(asset_id, 
-                                         date, 
-                                         day_mvmt)
+# class Watermark(Base):
+#     __tablename__='vw_watermarks'
+#     __table_args__={'extend_existing': True}
+#     asset_id = Column(Integer, ForeignKey('assets.id'), primary_key=True)
+#     date = Column(Date, primary_key=True)
+#     high_mark = Column(Boolean, primary_key=True)
+#     day_mvmt = Column(Integer, primary_key=True)
+#     unique_constraint = UniqueConstraint(asset_id, 
+#                                          date, 
+#                                          high_mark,
+#                                          day_mvmt)
+
+
+# class LowWatermark(Watermark):
+#     __tablename__='vw_low_watermarks'
+#     __table_args__={'extend_existing': True}
+#     asset_id = Column(Integer, 
+#                       ForeignKey('vw_watermarks.asset_id'), 
+#                       primary_key=True)
+#     date = Column(Date, primary_key=True)
+#     high_mark = Column(Boolean, primary_key=True)
+#     day_mvmt = Column(Integer, primary_key=True)
+#     unique_constraint = UniqueConstraint(asset_id, 
+#                                          date, 
+#                                          day_mvmt)
+
+# class HighWatermark(Watermark):
+#     __tablename__='vw_high_watermarks'
+#     __table_args__={'extend_existing': True}
+#     asset_id = Column(Integer, 
+#                       ForeignKey('vw_watermarks.asset_id'), 
+#                       primary_key=True)
+#     date = Column(Date, primary_key=True)
+#     high_mark = Column(Boolean, primary_key=True)
+#     day_mvmt = Column(Integer, primary_key=True)
+#     unique_constraint = UniqueConstraint(asset_id, 
+#                                          date, 
+#                                          day_mvmt)
 
 def name_for_collection_relationship(base, local_cls, referred_cls, constraint):
     reflexive_names = {
@@ -148,20 +157,20 @@ with warnings.catch_warnings():
              name_for_collection_relationship=name_for_collection_relationship)
 
 ## TABLE DEFINITIONS
-Account = Base.classes.accounts
-AccountType = Base.classes.account_types
-Api = Base.classes.apis
+# Account = Base.classes.accounts
+# AccountType = Base.classes.account_types
+# Api = Base.classes.apis
 Asset = Base.classes.assets
-BalanceHistory = Base.classes.balance_history
-BuoyHistory = Base.classes.buoy_history
-Client = Base.classes.clients
-PositionHistory = Base.classes.position_history
+# BalanceHistory = Base.classes.balance_history
+# BuoyHistory = Base.classes.buoy_history
+# Client = Base.classes.clients
+# PositionHistory = Base.classes.position_history
 PriceHistory = Base.classes.price_history
 Tidemark = Base.classes.tidemarks
 TidemarkDaily = Base.classes.tidemark_history_daily
 TidemarkHistory = Base.classes.tidemark_history
-TidemarkType = Base.classes.tidemark_types
-TransactionHistory = Base.classes.transaction_history
+# TidemarkType = Base.classes.tidemark_types
+# TransactionHistory = Base.classes.transaction_history
 
 
 
@@ -172,13 +181,13 @@ Asset.current_price = relationship(PriceHistory,
                             uselist=False,
                             overlaps=('price_history_collection'))
 
-Account.current_balance = relationship(
-                                BalanceHistory,
-                                primaryjoin=(
-                                    Account.id==BalanceHistory.account_id),
-                                order_by=lambda: BalanceHistory.date.desc(),
-                                uselist=False,
-                                overlaps=('balance_history_collection'))
+# Account.current_balance = relationship(
+#                                 BalanceHistory,
+#                                 primaryjoin=(
+#                                     Account.id==BalanceHistory.account_id),
+#                                 order_by=lambda: BalanceHistory.date.desc(),
+#                                 uselist=False,
+#                                 overlaps=('balance_history_collection'))
     # BalanceHistory.active_positions = relationship(
     #                             PositionHistory,
     #                             primaryjoin=(
@@ -300,14 +309,15 @@ if __name__=='__main__':
 #     mvmt_int_days = Column(Integer, primary_key=True)
 #     unique_constraint = UniqueConstraint(asset_id, date, pop, mvmt_int_days)    
 
-class TradeLog(Base):
-    __tablename__='vw_trade_log'
-    __table_args__={'extend_existing': True}
-    asset = Column(Text, ForeignKey('assets.asset'), primary_key=True)
-    account_id = Column(Text, ForeignKey('accounts.id'), primary_key=True)
-    api = Column(Text, ForeignKey('apis.api'), primary_key=True)
-    timestamp = Column(DateTime, primary_key=True)
-    unique_constraint = UniqueConstraint(account_id, api, asset, timestamp) 
+# class TradeLog(Base):
+#     __abstract = True
+#     __tablename__='vw_trade_log'
+#     __table_args__={'extend_existing': True}
+#     asset = Column(Text, ForeignKey('assets.asset'), primary_key=True)
+#     account_id = Column(Text, ForeignKey('accounts.id'), primary_key=True)
+#     api = Column(Text, ForeignKey('apis.api'), primary_key=True)
+#     timestamp = Column(DateTime, primary_key=True)
+#     unique_constraint = UniqueConstraint(account_id, api, asset, timestamp) 
 
 
 ## TABLE IMPORTS

@@ -12,7 +12,8 @@ from typing import List
 
 from . import *
 from ..believability import get_believability
-from ...database.models import TidemarkDaily, TidemarkHistory
+from ...database.models import TidemarkHistory #TidemarkDaily, 
+from ...database.landing import TidemarkDaily
 from ..prices import PricePipeline
 
 pd.options.mode.chained_assignment = None  # default='warn'
@@ -64,11 +65,11 @@ class DailyTidemarkPipeline(TidemarkPipeline):
 
         daily_tm['best_peg_ratio'] = (v.price * v.bs_sh_out
                                         ) / ((v.trail_12m_net_inc_avai_com_share \
-                                            * v.eps_growth) or np.nan)
+                                            * v.eps_growth).replace(0, np.nan))
         daily_tm['pe_ratio'] = (v.price * v.bs_sh_out
-                                ) / (v.trail_12m_net_inc_avai_com_share or np.nan)
+                                ) / (v.trail_12m_net_inc_avai_com_share.replace(0, np.nan))
         daily_tm['px_to_book_ratio'] = (v.price * v.bs_sh_out
-                                        ) / (v.tot_common_eqy or np.nan)
+                                        ) / (v.tot_common_eqy.replace(0, np.nan))
         daily_tm['current_ev_to_t12m_ebitda'] = (
                                     v.price * v.bs_sh_out \
                                         + v.ard_preferred_stock \
@@ -77,12 +78,12 @@ class DailyTidemarkPipeline(TidemarkPipeline):
                                         - v.cash_and_st_investments
                                         ) / ((v.sales_rev_turn \
                                                 - v.trail_12m_cost_of_matl \
-                                                - v.is_operating_expn) or np.nan)
+                                                - v.is_operating_expn).replace(0, np.nan))
         daily_tm['px_to_free_cash_flow'] = (v.price
                                             ) / ((v.cf_cash_from_oper \
                                                 - v.cf_cap_expend_inc_fix_asset \
                                                 - v.net_chng_lt_debt
-                                                ) or np.nan)
+                                                ).replace(0, np.nan))
         daily_tm['current_ev_to_t12m_fcf'] = v.price * (v.bs_sh_out \
                                             + v.ard_preferred_stock \
                                             + v.short_and_long_term_debt \
@@ -90,8 +91,8 @@ class DailyTidemarkPipeline(TidemarkPipeline):
                                             - v.cash_and_st_investments
                                         ) / ((v.cf_cash_from_oper \
                                                 - v.cf_cap_expend_inc_fix_asset \
-                                                - v.net_chng_lt_debt) or np.nan)
-        daily_tm['px_to_sales_ratio'] = v.price / (v.sales_rev_turn or np.nan)
+                                                - v.net_chng_lt_debt).replace(0, np.nan))
+        daily_tm['px_to_sales_ratio'] = v.price / (v.sales_rev_turn.replace(0, np.nan))
         daily_tm['price_id'] = v.id
         daily_tm = daily_tm.rename(self.id_tm_map, errors='ignore') \
                            .rename_axis('tidemark_id') \
@@ -135,11 +136,20 @@ class DailyTidemarkPipeline(TidemarkPipeline):
         return v
         # return self.create_tidemark_cols(v)
 
+    def _explode_daily_tidemark(self, s):
+        s.name = 'value'
+        return s.reset_index()
+
     def get_daily_tidemark_objects_by_asset(self) -> bool:
         daily_tm = self.create_daily_tidemarks_by_asset()
-        daily_tm_objs = [TidemarkDaily(**d._asdict()) \
-                            for d in daily_tm.itertuples(index=False) \
-                                if not np.isnan(d.value)]
+        daily_tm_objs = [[TidemarkDaily(tidemark_id=d.tidemark_id, **i._asdict()) \
+                            for i in self._explode_daily_tidemark(d.value).itertuples(index=False) if not np.isnan(i.value)
+                            ] for d in daily_tm.itertuples(index=False)]
+        
+        # )
+        # (**d._asdict()) for tm in ]\
+        #                     for d in daily_tm.itertuples(index=False) \
+        #                         if not np.isnan(d.value)]
         session.add_all(daily_tm_objs)
         return daily_tm_objs
 
@@ -198,7 +208,29 @@ class DailyTidemarkPipeline(TidemarkPipeline):
 if __name__=='__main__':
     for asset in asset_map.values():
         d = DailyTidemarkPipeline(asset, debug=True)
-        d.get_daily_scores(by_asset=True)
+        df = d.create_daily_tidemarks_by_asset()
+        # TODO: This creates a dataframe with 7 rows (one for each daily_tidemark applicable). 
+        # The values are nested series with asset_id and date. I need to get `price_id` and `tidemark_id` to the index.
+        daily_tms = {v._asdict()['tidemark_id']:v for v in df.itertuples()}
+        prices = pd.DataFrame({'price_id':daily_tms.pop('price_id').value})
+        tidemarks = pd.DataFrame({k: v.value for k,v in daily_tms.items()})
+
+        meds = tidemarks.rolling(window=252 * 20, 
+                          min_periods=252).median()
+
+        stds = tidemarks.rolling(window=252 * 20, 
+                          min_periods=252).std()
+
+        scores = (0.5 + (tidemarks - meds) / (2 * 1.382 * stds))
+        final_df = pd.DataFrame({'value':tidemarks.stack(), 'med_20y':meds.stack(), 'std_20y':stds.stack(), 'score':scores.stack()}).unstack()
+        final_df.index = final_df.index.map(prices.price_id)
+        final_df = final_df.stack(level=1)
+        final_df.index.names = ['price_id', 'tidemark_id']
+        daily_tm_objects = [TidemarkDaily(**d._asdict()) for d in final_df.reset_index().itertuples(index=False)]
+        session.merge(daily_tm_objects)
+        break
+
+        # d.get_daily_scores(by_asset=True)
         # logger.info("Committing Believabilities and tidemarks to database.")
         # session.commit()
         # session.refresh(asset)

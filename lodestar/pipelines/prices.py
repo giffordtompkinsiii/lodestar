@@ -72,7 +72,7 @@ class PricePipeline(AssetPipeline):
             logger.warning(f"No yfinance records or database records for "
                             + f"{a.asset}")
             return []
-        
+
         logger.info("Sleeping for yFinance API.")
         time.sleep(1)
 

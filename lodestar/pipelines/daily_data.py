@@ -8,6 +8,7 @@ calc_daily_tidemarks(v, debug=False)->pd.DataFrame:
 
 
 """
+from distutils.log import debug
 import time
 from sqlalchemy import delete
 
@@ -15,25 +16,38 @@ from . import *
 from .buoys import BuoyPipeline
 from .prices import PricePipeline
 
-from .tidemarks.daily import run_daily_tidemarks
+# from .tidemarks.daily import run_daily_tidemarks 
 
 class EndOfDayPipeline(AssetPipeline):
+    """End of Day Procedures in One Pipeline.
+    
+    This object contains all the necessary procedures to run in the end of day:
+    
+    Attributes
+    ==========
+    asset: Asset
+
+    price_pipeline
+    buoy_pipeline
+
+    Methods:
+    ========"""
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.price_pipeline = PricePipeline(asset=self.asset)
-        self.buoy_pipeline = BuoyPipeline(asset=self.asset, new_asset=False)
+        self.price_pipeline = PricePipeline(asset=self.asset, debug=True)
+        self.buoy_pipeline = BuoyPipeline(asset=self.asset, debug=True)
 
     def run_daily_procedures(self):
         self.buoy_pipeline.run_buoys()
 
-    def get_new_data(self):
-        pass
-        if self.price_pipeline.run_prices(asset):
-            run_daily_tidemarks(asset)
-            logger.debug(
-                f"{asset.current_price.date}, {asset.current_price.believability}"
-            )
-        return asset
+    # def get_new_data(self):
+    #     pass
+    #     if self.price_pipeline.run_prices(asset):
+    #         run_daily_tidemarks(asset)
+    #         logger.debug(
+    #             f"{asset.current_price.date}, {asset.current_price.believability}"
+    #         )
+    #     return asset
 
 
     def update_old_data(self):
@@ -60,5 +74,5 @@ if __name__=='__main__':
     t_0 = time.time()
     for a, asset in asset_map.items():
         logger.info(f"{asset.id} - {asset} Running Daily Procedures.")
-        d = EndOfDayPipeline(asset)
+        d = EndOfDayPipeline(asset, debug=True)
         d.run_daily_procedures()

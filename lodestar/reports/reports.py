@@ -81,8 +81,8 @@ def push_reports(sheet_id: str = sheet_id):
     push_report(sheet_id=sheet_id,
                 sheet_name='AlgoTrading', 
                 db_object=AlgoTrading, 
-                columns=['date','asset_id','asset','in_portfolio','trans',
-                         'closing_price','bound'],
+                columns=['date','asset_id','asset', 'believability','in_portfolio','transaction',
+                         'closing_price','trigger_price'],
                 update_time_offset=3)
 
     
