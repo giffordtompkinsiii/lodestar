@@ -2,6 +2,8 @@
 # Python Documentaion https://bloomberg.github.io/blpapi-docs/python/3.18/_autosummary/blpapi.Request.html
 
 import blpapi as bb 
+import datetime as dt
+from lodestar.database.maps import asset_map, tidemark_map
 
 options = bb.SessionOptions()
 options.setServerHost('192.168.100.1')
@@ -42,27 +44,34 @@ dmiStudyEle.getElement("priceSourceClose").setValue("PX_LAST")
 session.sendRequest(request, None)
 
 
-## Quarterly Tidemarks
-tidemarks = ["RETURN_COM_EQY", 
-             "RETURN_ON_WORK_CAP",
-             "RETURN_ON_INV_CAPITAL"]
-session.openService('//blp/refdata')
-refDataService = session.getService("//blp/refdata")
-request = refDataService.createRequest("HistoricalDataRequest")
-request.getElement("securities").appendValue('IBM US Equity')
-request.getElement("securities").appendValue('AAPL US Equity')
-request.getElement("securities").appendValue('NUE US Equity')
+# ## Quarterly Tidemarks
+if __name__=='__main__':
+# tidemarks = ["RETURN_COM_EQY", 
+#              "RETURN_ON_WORK_CAP",
+#              "RETURN_ON_INV_CAPITAL"]
+    session.openService('//blp/refdata')
+    refDataService = session.getService("//blp/refdata")
+    request = refDataService.createRequest("HistoricalDataRequest")
+    for a in asset_map.values():
+        request.getElement('securities').appendValue(f'{a.asset} US Equity')
 
-request.getElement("fields").appendValue(tidemarks[0])
-request.getElement("fields").appendValue(tidemarks[1])
-request.getElement("fields").appendValue(tidemarks[2])
+    for tm in tidemark_map.values():
+        request.getElement("fields").appendValue(tm.tidemark.upper())
 
-request.set("periodicitySelection", "MONTHLY")
-request.set("startDate", "20120101")
-request.set("endDate", "20121231")
-session.sendRequest(request)
+    # request.getElement("securities").appendValue('IBM US Equity')
+    # request.getElement("securities").appendValue('AAPL US Equity')
+    # request.getElement("securities").appendValue('NUE US Equity')
 
-event = session.nextEvent()
-event.eventType()
-for msg in event:
-    print(msg.messageType())
+    # request.getElement("fields").appendValue(tidemarks[0])
+    # request.getElement("fields").appendValue(tidemarks[1])
+    # request.getElement("fields").appendValue(tidemarks[2])
+
+    request.set("periodicitySelection", "MONTHLY")
+    request.set("startDate", "19991231")
+    request.set("endDate", dt.date.today().strftime('%Y%m%d'))
+    session.sendRequest(request)
+
+    event = session.nextEvent()
+    event.eventType()
+    for msg in event:
+        print(msg.messageType())
