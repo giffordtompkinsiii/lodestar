@@ -153,6 +153,7 @@ class BloombergPipeline(object):
 
 
 
+
 if __name__=='__main__':
     b = BloombergPipeline()
     b.generate_workbook()

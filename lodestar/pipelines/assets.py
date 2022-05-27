@@ -1,5 +1,5 @@
-from multiprocessing.context import assert_spawning
-from numpy import full, insert
+from asyncio import get_running_loop
+import os
 from lodestar.database.maps import asset_map 
 from lodestar.database import engine
 import pandas as pd
@@ -7,6 +7,7 @@ import yfinance as yf
 from tqdm import tqdm
 import time
 import regex as re
+import multiprocessing as mp
 
 assets = [a.asset for a in asset_map.values()]
 
@@ -15,11 +16,12 @@ def camel_to_snake(name):
     name = re.sub('(.)([A-Z][a-z]+)', r'\1_\2', name)
     return re.sub('([a-z0-9])([A-Z])', r'\1_\2', name).lower()
 
-def refresh_assets_table():
+def refresh_assets_table(assets, if_exists):
     full_ticker_info = []
-    for i, asset in enumerate(tqdm(assets[0:10])):
+    for i, asset in enumerate(tqdm(assets)):
         ticker_info = get_ticker_info(asset)
-        full_ticker_info.append(ticker_info)
+        if ticker_info:
+            full_ticker_info.append(ticker_info, if_exists)
     try:
         insert_asset_info(full_ticker_info, 'replace')
     except:
@@ -39,7 +41,8 @@ def insert_asset_info(ticker_info, if_exists='append'):
             con=engine,
             schema='landing',
             if_exists=if_exists,
-            index=False
+            index=False,
+            chunksize=100
     )
 
 def get_ticker_info(asset_symbol:str):
@@ -51,12 +54,28 @@ def get_ticker_info(asset_symbol:str):
     else:
         return None
 
-def main():
-    for i, asset in enumerate(tqdm(assets)):
-        if i:
-            add_new_asset(asset)
-        else:
-            add_new_asset(asset, 'replace')
+def get_info_for_tickers(proc_num, assets, return_dict):
+    return_dict[proc_num] = [get_ticker_info(a) for a in tqdm(assets)]
 
 if __name__=='__main__':
-    full_ticker_info = refresh_assets_table()
+    mp.freeze_support()
+    manager = mp.Manager()
+    return_dict = manager.dict()
+
+    jobs = []
+    cpu_count = os.cpu_count()
+    
+    for i in range(cpu_count):
+        p = mp.Process(target=get_info_for_tickers,
+                       args=(i, assets[i::cpu_count], return_dict)
+        )
+        jobs.append(p)
+        p.start()
+
+    for job in jobs:
+        job.join()
+
+    df = pd.DataFrame([r for proc in return_dict.values() for r in proc if r])
+    df.columns = [camel_to_snake(c) for c in df.columns]
+    df = df.dropna(axis=1)
+    df.to_sql(name='assets', con=engine, schema='landing', index=False, if_exists='replace')
