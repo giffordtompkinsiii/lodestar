@@ -8,6 +8,7 @@ from tqdm import tqdm
 import time
 import regex as re
 import multiprocessing as mp
+import datetime as dt
 
 assets = [a.asset for a in asset_map.values()]
 
@@ -78,4 +79,5 @@ if __name__=='__main__':
     df = pd.DataFrame([r for proc in return_dict.values() for r in proc if r])
     df.columns = [camel_to_snake(c) for c in df.columns]
     df = df.dropna(axis=1)
+    df['etl_loaded_datetime_utc'] = dt.datetime.utcnow()
     df.to_sql(name='assets', con=engine, schema='landing', index=False, if_exists='replace')

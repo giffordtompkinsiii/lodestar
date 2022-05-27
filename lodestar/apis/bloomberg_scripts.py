@@ -3,6 +3,11 @@
 
 import blpapi as bb 
 import datetime as dt
+import pandas as pd
+import time
+from sqlalchemy import true
+from lodestar import logger
+from lodestar.database import engine
 from lodestar.database.maps import asset_map, tidemark_map
 
 options = bb.SessionOptions()
@@ -46,32 +51,58 @@ session.start()
 
 # ## Quarterly Tidemarks
 if __name__=='__main__':
-# tidemarks = ["RETURN_COM_EQY", 
-#              "RETURN_ON_WORK_CAP",
-#              "RETURN_ON_INV_CAPITAL"]
-    session.openService('//blp/refdata')
-    refDataService = session.getService("//blp/refdata")
-    request = refDataService.createRequest("HistoricalDataRequest")
-    for a in asset_map.values():
-        request.getElement('securities').appendValue(f'{a.asset} US Equity')
+    time.sleep(10)
+    t = time.time()
+    full_df = pd.DataFrame()
+    assets = asset_map.values()
+    tidemarks = [tm for tm in tidemark_map.values() if not (tm.daily or tm.calculated)]
+    partial_dfs = {}
 
-    for tm in tidemark_map.values():
-        request.getElement("fields").appendValue(tm.tidemark.upper())
+    for i in range(len(tidemarks)//25 + 1):
+        partial_df = pd.DataFrame()
+        session.openService('//blp/refdata')
+        refDataService = session.getService("//blp/refdata")
+        request = refDataService.createRequest("HistoricalDataRequest")
+        for a in assets:
+            request.getElement('securities').appendValue(f'{a.asset} US Equity')
 
-    # request.getElement("securities").appendValue('IBM US Equity')
-    # request.getElement("securities").appendValue('AAPL US Equity')
-    # request.getElement("securities").appendValue('NUE US Equity')
+        for tm in tidemarks[25*i:25*(i+1)]:
+            request.getElement("fields").appendValue(tm.tidemark.upper())
 
-    # request.getElement("fields").appendValue(tidemarks[0])
-    # request.getElement("fields").appendValue(tidemarks[1])
-    # request.getElement("fields").appendValue(tidemarks[2])
+        request.set("periodicitySelection", "MONTHLY")
+        request.set("startDate", "19991231")
+        request.set("endDate", dt.date.today().strftime('%Y%m%d'))
+        session.sendRequest(request)
+        time.sleep(10)
+        while True:
+            event = session.nextEvent(10)
+            if event.eventType()==10:
+                break
+            logger.info(event.eventType())
+            for msg in event:
+                logger.info(msg.messageType())
+                if msg.messageType()=='HistoricalDataResponse':
+                    print(msg.toPy())
+                    data = msg.toPy().get('securityData')
+                    df = pd.DataFrame(data['fieldData'])
+                    df.columns = [c.lower() for c in df.columns]
+                    df['security'] = data['security']
+                    partial_df = pd.concat([partial_df, df])
+                    logger.info(partial_df.shape)
+        if not partial_df.empty:
+            partial_dfs[i] = partial_df.set_index(['security','date'])
 
-    request.set("periodicitySelection", "MONTHLY")
-    request.set("startDate", "19991231")
-    request.set("endDate", dt.date.today().strftime('%Y%m%d'))
-    session.sendRequest(request)
-
-    event = session.nextEvent()
-    event.eventType()
-    for msg in event:
-        print(msg.messageType())
+    try:
+        full_df = partial_dfs[0].join(partial_dfs[1])
+    except KeyError as e:
+        logger.warning(e)
+        logger.debug(partial_dfs.keys())
+    full_df['etl_loaded_datetime_utc'] = dt.datetime.utcnow()
+    full_df.reset_index().to_sql(name='tidemark_history', 
+                                 con=engine, 
+                                 schema='landing',
+                                 if_exists='replace', 
+                                 index=True, 
+                                 index_label='batch_index')
+    logger.info(f"Total Time: {time.time() - t} seconds.")
+    
