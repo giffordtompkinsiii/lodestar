@@ -1,4 +1,3 @@
-from asyncio import get_running_loop
 import os
 from lodestar.database.maps import asset_map 
 from lodestar.database import engine
@@ -9,6 +8,7 @@ import time
 import regex as re
 import multiprocessing as mp
 import datetime as dt
+import numpy as np
 
 assets = [a.asset for a in asset_map.values()]
 
@@ -78,6 +78,8 @@ if __name__=='__main__':
 
     df = pd.DataFrame([r for proc in return_dict.values() for r in proc if r])
     df.columns = [camel_to_snake(c) for c in df.columns]
-    df = df.dropna(axis=1)
+    df = df.dropna(axis=1, how='all')
+    dict_columns = ['sector_weightings', 'holdings', 'bond_holdings', 'bond_ratings', 'equity_holdings']
+
     df['etl_loaded_datetime_utc'] = dt.datetime.utcnow()
-    df.to_sql(name='assets', con=engine, schema='landing', index=False, if_exists='replace')
+    df.drop(columns=dict_columns).to_sql(name='assets', con=engine, schema='landing', index=False, if_exists='replace')
