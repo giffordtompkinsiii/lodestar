@@ -8,13 +8,11 @@ fomat_prices(asset: Asset)->pd.DataFrame
 create_daily_tidemarks(v:pd.DataFrame)->pd.DataFrame
 
 """
-from typing import List
 
 from . import *
 from ..believability import get_believability
-from ...database.models import TidemarkHistory #TidemarkDaily, 
 from ...database.landing import TidemarkDaily
-from ..prices import PricePipeline
+from pipelines.bulk_pipelines.prices import PricePipeline
 
 pd.options.mode.chained_assignment = None  # default='warn'
 

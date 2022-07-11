@@ -8,13 +8,11 @@ calc_daily_tidemarks(v, debug=False)->pd.DataFrame:
 
 
 """
-from distutils.log import debug
-import time
 from sqlalchemy import delete
 
 from . import *
 from .buoys import BuoyPipeline
-from .prices import PricePipeline
+from pipelines.bulk_pipelines.prices import PricePipeline
 
 # from .tidemarks.daily import run_daily_tidemarks 
 

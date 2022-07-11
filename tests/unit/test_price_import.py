@@ -1,4 +1,4 @@
-from ...pipelines.prices import PricePipeline, asset_map, Asset
+from pipelines.bulk_pipelines.prices import PricePipeline, asset_map
 import datetime as dt
 from pandas.tseries.offsets import BDay
 import unittest

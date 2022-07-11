@@ -8,20 +8,31 @@ import multiprocessing as mp
 from typing import List
 
 from .. import logging, logger, data_file_dir, tools_dir
-from ..database.maps import asset_map
-from ..database.models import Asset, BuoyHistory, PriceHistory, session
-from ..database.functions import collection_to_dataframe, on_conflict_do_nothing
+from ..database import landing
+# from ..database.functions import collection_to_dataframe, on_conflict_do_nothing
+from abc import ABC, abstractmethod
 
-class AssetPipeline(object):
-    today = dt.date.today()
-    end_of_day = (dt.datetime.utcnow() + dt.timedelta(hours=3)).date()
-    date_21y_ago = pd.to_datetime(dt.date(year=today.year - 21, 
-                                          month=today.month, 
-                                          day=today.day))
-    logger.debug(f"End of day: {end_of_day}")
-    logger.debug(f"20 years ago: {date_21y_ago}")
 
-    def __init__(self, asset:Asset, debug:bool=False):
-        self.asset = asset 
-        self.debug = debug 
-        logger.setLevel((debug * logging.DEBUG) or logging.INFO)
+class Pipeline(ABC):
+
+    @abstractmethod
+    def extract(self) -> dict:
+        return dict()
+
+    @abstractmethod
+    def transform(self) -> dict:
+        return dict()
+
+    @abstractmethod
+    def load(self) -> None:
+        return None
+
+    # @abstractmethod
+    def run_pipeline(self):
+        extracted_data = self.extract()
+        transformed_data = self.transform(extracted_data)
+        self.load(transformed_data)
+        print("Pipeline completed")
+
+# TODO: Fix landing module.
+# TODO: Create AssetsBulkPipeline?

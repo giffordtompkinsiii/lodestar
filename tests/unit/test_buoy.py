@@ -1,4 +1,4 @@
-from ...pipelines.buoys import BuoyPipeline, asset_map, Asset
+from pipelines.buoys import BuoyPipeline, asset_map, Asset
 import datetime as dt
 from pandas.tseries.offsets import BDay
 import unittest

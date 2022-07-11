@@ -1,13 +1,12 @@
+from distutils.log import debug
 import time
 import pandas as pd
 import datetime as dt
 import yfinance as yf
 
 from typing import List
-from pipelines import Pipeline
-from pipelines.assets import AssetPipeline
-from lodestar import logger
-
+from pipelines import (AssetPipeline, logger, Asset, PriceHistory,
+                       on_conflict_do_nothing, session, asset_map)
 
 class PricePipeline(AssetPipeline):
     """PricePipeline imports new prices for given asset
@@ -27,24 +26,6 @@ class PricePipeline(AssetPipeline):
     get_price(): List[prices]
         Pull prices from Yahoo!Finance for given `database.models.Asset`.
     """
-
-    def __init__(self, symbol: str, debug: bool = False, start_date: str = None, end_date: str = None):
-        self.ticker = yf.Ticker(symbol)
-        self.end_date = end_date or
-        self.start_date = start_date
-
-    def extract(self) -> dict:
-        """Hits yFinance API and returns ticker from database."""
-        ticker = yf.Ticker(self.symbol)
-        self.info = ticker.info
-        return self.info
-
-    def transform(self) -> dict:
-        pass
-
-    def load(self) -> None:
-        pass
-
     unique_key = 'price_history_asset_id_date_key'
 
     def get_last_date(self):

@@ -1,85 +1,87 @@
-import os
-from lodestar.database.maps import asset_map 
-from lodestar.database import engine
-import pandas as pd
-import yfinance as yf
-from tqdm import tqdm
 import time
-import regex as re
-import multiprocessing as mp
-import datetime as dt
 import numpy as np
+import pandas as pd
+import datetime as dt
+import yfinance as yf
+import multiprocessing as mp
 
-assets = [a.asset for a in asset_map.values()]
+from typing import List
+from sqlalchemy.orm.session import sessionmaker
+
+from lodestar.pipelines import Pipeline
+from lodestar import logging, logger
+from lodestar.database import landing, engine
+# from ..database.functions import collection_to_dataframe, on_conflict_do_nothing
+from abc import ABC, abstractmethod
 
 
-def camel_to_snake(name):
-    name = re.sub('(.)([A-Z][a-z]+)', r'\1_\2', name)
-    return re.sub('([a-z0-9])([A-Z])', r'\1_\2', name).lower()
+class AssetPipeline(Pipeline):
+    # today = dt.date.today()
+    # end_of_day = (dt.datetime.utcnow() + dt.timedelta(hours=3)).date()
+    # date_21y_ago = pd.to_datetime(dt.date(year=today.year - 21, 
+    #                                       month=today.month, 
+    #                                       day=today.day))
+    # logger.debug(f"End of day: {end_of_day}")
+    # logger.debug(f"20 years ago: {date_21y_ago}")
 
-def refresh_assets_table(assets, if_exists):
-    full_ticker_info = []
-    for i, asset in enumerate(tqdm(assets)):
-        ticker_info = get_ticker_info(asset)
-        if ticker_info:
-            full_ticker_info.append(ticker_info, if_exists)
-    try:
-        insert_asset_info(full_ticker_info, 'replace')
-    except:
-        pass
-    finally:
-        return full_ticker_info
+    def __init__(self, symbol: str, debug: bool = False):
+        self.symbol = symbol
+        self.debug = debug
+        self.transformed_data = None
+        self.info = None
+        logger.setLevel((debug * logging.DEBUG) or logging.INFO)
 
-def add_new_asset(asset_symbol:str, if_exists='append'):
-    ticker_info = get_ticker_info(asset_symbol)
-    insert_asset_info(ticker_info, if_exists)
+    def extract(self) -> dict:
+        """Hits yFinance API and returns ticker from database."""
+        ticker = yf.Ticker(self.symbol)
+        self.info = ticker.info
+        return self.info
 
-def insert_asset_info(ticker_info, if_exists='append'):
-    df = pd.DataFrame(ticker_info)
-    df.columns = [camel_to_snake(c) for c in df.columns]
-
-    df.to_sql(name='assets',
-            con=engine,
-            schema='landing',
-            if_exists=if_exists,
-            index=False,
-            chunksize=100
-    )
-
-def get_ticker_info(asset_symbol:str):
-    t = yf.Ticker(asset_symbol)
-    time.sleep(1)
-
-    if any(t.info.values()):
-        return t.info
-    else:
-        return None
-
-def get_info_for_tickers(proc_num, assets, return_dict):
-    return_dict[proc_num] = [get_ticker_info(a) for a in tqdm(assets)]
-
-if __name__=='__main__':
-    mp.freeze_support()
-    manager = mp.Manager()
-    return_dict = manager.dict()
-
-    jobs = []
-    cpu_count = os.cpu_count()
-    
-    for i in range(cpu_count):
-        p = mp.Process(target=get_info_for_tickers,
-                       args=(i, assets[i::cpu_count], return_dict)
+    def transform(self, extract_data) -> dict:
+        d = extract_data
+        self.transformed_data = dict(
+            zip=d.get('zip', 'Unknown'),
+            sector=d.get('sector', 'Unknown'),
+            full_time_employees=d.get('fullTimeEmployees', 'Unknown'),
+            long_business_summary=d.get('longBusinessSummary', 'Unknown'),
+            city=d.get('city', 'Unknown'),
+            phone=d.get('phone', 'Unknown'),
+            state=d.get('state', 'Unknown'),
+            country=d.get('country', 'Unknown'),
+            company_officers=d.get('companyOfficers', 'Unknown'),
+            website=d.get('website', 'Unknown'),
+            max_age=d.get('maxAge', 'Unknown'),
+            address1=d.get('address1', 'Unknown'),
+            industry=d.get('industry', 'Unknown'),
+            financial_currency=d.get('financialCurrency', 'Unknown'),
+            exchange=d.get('exchange', 'Unknown'),
+            short_name=d.get('shortName', 'Unknown'),
+            long_name=d.get('longName', 'Unknown'),
+            exchange_timezone_name=d.get('exchangeTimezoneName', 'Unknown'),
+            exchange_timezone_short_name=d.get('exchangeTimezoneShortName', 'Unknown'),
+            is_esg_populated=d.get('isEsgPopulated', 'Unknown'),
+            gmt_off_set_milliseconds=d.get('gmtOffSetMilliseconds', 'Unknown'),
+            quote_type=d.get('quoteType', 'Unknown'),
+            symbol=d.get('symbol', 'Unknown'),
+            message_board_id=d.get('messageBoardId', 'Unknown'),
+            market=d.get('market', 'Unknown'),
+            last_split_factor=d.get('lastSplitFactor', 'Unknown'),
+            logo_url=d.get('logo_url', 'Unknown'),
+            etl_loaded_datetime_utc=dt.datetime.utcnow()
         )
-        jobs.append(p)
-        p.start()
+        return self.transformed_data
 
-    for job in jobs:
-        job.join()
+    def load(self, transformed_data):
+        new_asset = landing.Asset(**transformed_data)
+        session.add(new_asset)
 
-    df = pd.DataFrame([r for proc in return_dict.values() for r in proc if r])
-    df.columns = [camel_to_snake(c) for c in df.columns]
-    df = df.dropna(axis=1, how='all')
-    dict_columns = ['sector_weightings', 'holdings', 'bond_holdings', 'bond_ratings', 'equity_holdings']
 
-    df['etl_loaded_datetime_utc'] = dt.datetime.utcnow()
-    df.drop(columns=dict_columns).to_sql(name='assets', con=engine, schema='landing', index=False, if_exists='replace')
+if __name__ == '__main__':
+    Session = sessionmaker()
+    session = Session(bind=engine, expire_on_commit=False)
+
+    for a in ['T', 'AAPL', 'GOOGL']:
+        a = AssetPipeline(a)
+        a.run_pipeline()
+    session.commit()
+    session.close()

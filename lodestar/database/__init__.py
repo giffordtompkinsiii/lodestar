@@ -17,7 +17,6 @@ import numpy as np
 import psycopg2.extensions as psyco
 
 from sqlalchemy import create_engine
-from sqlalchemy.schema import MetaData
 
 from .. import logger
 
@@ -65,9 +64,7 @@ def formatting_proxy(home_directory):
 
 url = formatting_proxy(home_dir)
 engine = create_engine(url, connect_args=connect_args)
-metadata = MetaData(bind=engine, 
-                    schema='financial'
-                    )
+
 
 if __name__=='__main__':
     logger.info(url)
