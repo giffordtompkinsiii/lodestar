@@ -1,18 +1,9 @@
-import time
-import numpy as np
-import pandas as pd
 import datetime as dt
 import yfinance as yf
-import multiprocessing as mp
-
-from typing import List
 from sqlalchemy.orm.session import sessionmaker
-
-from lodestar.pipelines import Pipeline
+from pipelines import Pipeline
 from lodestar import logging, logger
 from lodestar.database import landing, engine
-# from ..database.functions import collection_to_dataframe, on_conflict_do_nothing
-from abc import ABC, abstractmethod
 
 
 class AssetPipeline(Pipeline):
@@ -25,20 +16,21 @@ class AssetPipeline(Pipeline):
     # logger.debug(f"20 years ago: {date_21y_ago}")
 
     def __init__(self, symbol: str, debug: bool = False):
+        self.extracted_data = None
+        self.transformed_data = None
         self.symbol = symbol
         self.debug = debug
         self.transformed_data = None
-        self.info = None
         logger.setLevel((debug * logging.DEBUG) or logging.INFO)
 
     def extract(self) -> dict:
         """Hits yFinance API and returns ticker from database."""
         ticker = yf.Ticker(self.symbol)
-        self.info = ticker.info
-        return self.info
+        self.extracted_data = ticker.info
+        return self.extracted_data
 
-    def transform(self, extract_data) -> dict:
-        d = extract_data
+    def transform(self) -> dict:
+        d = self.extracted_data if self.extracted_data else self.extract()
         self.transformed_data = dict(
             zip=d.get('zip', 'Unknown'),
             sector=d.get('sector', 'Unknown'),
@@ -71,9 +63,11 @@ class AssetPipeline(Pipeline):
         )
         return self.transformed_data
 
-    def load(self, transformed_data):
-        new_asset = landing.Asset(**transformed_data)
+    def load(self):
+        data = self.transformed_data if self.transformed_data else self.transform()
+        new_asset = landing.Asset(**data)
         session.add(new_asset)
+        session.commit()
 
 
 if __name__ == '__main__':

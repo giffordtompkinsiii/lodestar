@@ -1,0 +1,3 @@
+#! /bin/sh
+
+"$HOME"/cloud_sql_proxy -dir="$HOME"/cloudsql &

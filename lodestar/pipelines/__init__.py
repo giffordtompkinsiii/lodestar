@@ -1,38 +1,24 @@
-import time
-import numpy as np
-import pandas as pd
-import datetime as dt
-import yfinance as yf
-import multiprocessing as mp
-
-from typing import List
-
-from .. import logging, logger, data_file_dir, tools_dir
-from ..database import landing
-# from ..database.functions import collection_to_dataframe, on_conflict_do_nothing
-from abc import ABC, abstractmethod
+from abc import ABC
+from typing import List, Dict
 
 
 class Pipeline(ABC):
-
-    @abstractmethod
-    def extract(self) -> dict:
+    @classmethod
+    def extract(cls) -> dict:
         return dict()
 
-    @abstractmethod
-    def transform(self) -> dict:
+    @classmethod
+    def transform(cls) -> List[Dict]:
         return dict()
 
-    @abstractmethod
-    def load(self) -> None:
+    @classmethod
+    def load(cls) -> None:
         return None
 
-    # @abstractmethod
+    # @classmethod
     def run_pipeline(self):
-        extracted_data = self.extract()
-        transformed_data = self.transform(extracted_data)
-        self.load(transformed_data)
+        self.extract()
+        self.transform()
+        self.load()
         print("Pipeline completed")
 
-# TODO: Fix landing module.
-# TODO: Create AssetsBulkPipeline?
