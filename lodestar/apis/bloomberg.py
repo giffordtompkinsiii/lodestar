@@ -1,74 +1,70 @@
-"""
-This module imports the qtrly tidemarks from the excel document.
+# Core API https://data.bloomberglp.com/professional/sites/10/2017/03/BLPAPI-Core-Developer-Guide.pdf
+# Python Documentaion https://bloomberg.github.io/blpapi-docs/python/3.18/_autosummary/blpapi.Request.html
+from lodestar.database.maps import asset_map, tidemark_map
+from lodestar import logger
 
-User specifies a file path with the -p flag.
-
-Steps
------
-1. Import tidemarks.
-2. Check for new tidemarks
-3. Run through tidemark import by asset and compare to last 20 years for score.
-4. Store new values in the database.
-5. Pull values for growth tidemarks and store those in database as well.
-
-"""
-import os
-import time
-import pickle
-import argparse
-
-import numpy as np 
-import pandas as pd 
 import datetime as dt
-import multiprocessing as mp
-
-from tqdm import tqdm
-from sqlalchemy import exists
-
-from .. import logger
-from ..database.maps import tidemark_map
-from ..database.models import Asset, TidemarkHistory, Tidemark, session
-from ..database.functions import (all_query, collection_to_dataframe as to_df)
-
-assets = all_query(Asset)
-
-class BloombergPipeline():
-    tm_map = {tm.tidemark: tm for tm in tidemark_map.values()}
-
-    def __init__(self, filepath):
-        self.filepath = filepath
-        self.workbook = pd.read_excel(filepath,
-                                      sheet_name=None,
-                                      parse_dates=True,
-                                      engine='openpyxl')
+import pandas as pd
+import blpapi as bb
+import time
 
 
-    class BloombergAsset(Asset):
-        def __init__(self, asset:Asset, workbook):
-            [setattr(self, k, v) for k,v in asset.__dict__.items()]
-            self.dataframe = workbook.get(asset.asset, pd.DataFrame())
-            
-        def format_dataframe(self):
-            """check if dataframe before running."""
-            df = self.dataframe
+class BloombergAPI:
+    assets = asset_map.values()
+    tidemarks = [tm for tm in tidemark_map.values() if not (tm.daily or tm.calculated)]
+    partial_dfs = {}
 
-            # Set DatetimeIndex to quater-end dates
-            df = df.set_index(df.Dates + pd.offsets.QuarterEnd(n=0)).drop(columns='Dates')
-            df.index.name = 'date'
+    def __init__(self):
+        options = bb.SessionOptions()
+        options.setServerHost('localhost')
+        options.setServerPort(8194)
 
-            # Stack dataframe
-            stack = df.melt(ignore_index=False)
-            stack['tidemark_id'] = stack.variable.map(
-                                            lambda t: getattr(BloombergPipeline.tm_map.get(t), 'id', np.nan)
-                                            )
-            stack = stack.dropna(subset=['tidemark_id'])
-            stack['asset_id'] = self.id
+        self.api_session = bb.Session(options)
+        self.api_session.start()
 
+    def get_tidemarks(self, symbol):
+        t = time.time()
+        full_df = pd.DataFrame()
+        partial_dfs = {}
+        for i in range(len(self.tidemarks)//25 + 1):
+            partial_df = pd.DataFrame()
+            self.api_session.openService('//blp/refdata')
+            ref_data_service = self.api_session.getService("//blp/refdata")
+            request = ref_data_service.createRequest("HistoricalDataRequest")
+            request.getElement('securities').appendValue(f'{symbol} US Equity')
 
+            for tm in self.tidemarks[25 * i: 25 * (i + 1)]:
+                request.getElement("fields").appendValue(tm.tidemark.upper())
 
-    class BloombergTidemark(TidemarkHistory):
-        def __init__(self, tm: TidemarkHistory):
-            [setattr(self, k, v) for k,v in tm.__dict__.items()]
+            request.set("periodicitySelection", "MONTHLY")
+            request.set("startDate", "19991231")
+            request.set("endDate", dt.date.today().strftime('%Y%m%d'))
+            self.api_session.sendRequest(request)
+            time.sleep(10)
 
+            while True:
+                event = self.api_session.nextEvent(10)
+                if event.eventType()==10:
+                    break
+                logger.info(event.eventType())
+                for msg in event:
+                    logger.info(msg.messageType())
+                    if msg.messageType()=='HistoricalDataResponse':
+                        print(msg.toPy())
+                        data = msg.toPy().get('securityData')
+                        df = pd.DataFrame(data['fieldData'])
+                        df.columns = [c.lower() for c in df.columns]
+                        df['security'] = data['security']
+                        partial_df = pd.concat([partial_df, df])
+                        logger.info(partial_df.shape)
+            if not partial_df.empty:
+                partial_dfs[i] = partial_df.set_index(['security','date'])
+        try:
+            full_df = partial_dfs[0].join(partial_dfs[1])
+        except KeyError as e:
+            logger.warning(e)
+            logger.debug(partial_dfs.keys())
 
+        logger.info(f"Total Time: {time.time() - t} seconds.")
+        return full_df
 

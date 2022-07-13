@@ -17,17 +17,17 @@ collection_to_dataframe(query_results)->pandas.DataFrame
 all_query(table)->list:
     All-Query - Returns all records for given table object
 """
+from lodestar.database import logger, engine
+
+from sqlalchemy import UniqueConstraint, PrimaryKeyConstraint
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.orm import sessionmaker
+from typing import Tuple
 from tqdm import tqdm
+
+import datetime as dt
 import pandas as pd
 import decimal
-import datetime as dt
-from sqlalchemy import types, UniqueConstraint, PrimaryKeyConstraint
-from psycopg2 import errors as psycopg_errors
-from lodestar.database import logger, engine
-from sqlalchemy.orm import sessionmaker
-from typing import List, Tuple
-
-from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 Session = sessionmaker()
 session = Session(bind=engine, expire_on_commit=False)
@@ -267,39 +267,6 @@ def update_database_object(import_df, db_records, db_table, debug=False,
 
     return refresh_object
 
-
-def add_new_objects(new_objects, refresh_object=None):
-    """Add items to database and refresh relevant objects."""
-    try:
-        session.add_all(new_objects)
-        session.commit()
-    except:
-        session.rollback()
-        for r in new_objects:
-            session.add(r)
-            session.commit()
-    if refresh_object:
-        session.refresh(refresh_object)
-    else:
-        session.expire_all()
-    return new_objects
-
-
-def add_assets(*asset_names):
-    for asset_name in asset_names:
-        logger.info(f"Importing new asset: {asset_name}")
-        # new_asset = Asset()
-        # new_asset.asset = asset_name 
-        try:
-            session.merge(Asset(asset=asset_name))
-        except psycopg_errors.IntegrityError:
-            continue
-    session.commit()
-    # try:
-    #     session.commit()
-    # except psycopg_errors.UniqueViolation:
-    #     logger.info(f"{asset_name} already in database.")
-    #     session
 
 # if __name__=='__main__':
 #     add_assets('ROAD', 'MSTR')

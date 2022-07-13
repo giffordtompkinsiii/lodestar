@@ -1,37 +1,29 @@
+from lodestar.database import landing, engine
+from lodestar.pipelines import Pipeline
+
+from sqlalchemy.orm.session import sessionmaker
+
 import datetime as dt
 import yfinance as yf
-from sqlalchemy.orm.session import sessionmaker
-from pipelines import Pipeline
-from lodestar import logging, logger
-from lodestar.database import landing, engine
 
 
 class AssetPipeline(Pipeline):
-    # today = dt.date.today()
-    # end_of_day = (dt.datetime.utcnow() + dt.timedelta(hours=3)).date()
-    # date_21y_ago = pd.to_datetime(dt.date(year=today.year - 21, 
-    #                                       month=today.month, 
-    #                                       day=today.day))
-    # logger.debug(f"End of day: {end_of_day}")
-    # logger.debug(f"20 years ago: {date_21y_ago}")
+    LandingClass = landing.Asset
 
     def __init__(self, symbol: str, debug: bool = False):
+        super().__init__(symbol, debug)
         self.extracted_data = None
         self.transformed_data = None
-        self.symbol = symbol
-        self.debug = debug
-        self.transformed_data = None
-        logger.setLevel((debug * logging.DEBUG) or logging.INFO)
+        self.ticker = yf.Ticker(self.symbol)
 
     def extract(self) -> dict:
         """Hits yFinance API and returns ticker from database."""
-        ticker = yf.Ticker(self.symbol)
-        self.extracted_data = ticker.info
+        self.extracted_data = self.ticker.info
         return self.extracted_data
 
-    def transform(self) -> dict:
+    def transform(self):
         d = self.extracted_data if self.extracted_data else self.extract()
-        self.transformed_data = dict(
+        self.transformed_data = [dict(
             zip=d.get('zip', 'Unknown'),
             sector=d.get('sector', 'Unknown'),
             full_time_employees=d.get('fullTimeEmployees', 'Unknown'),
@@ -59,15 +51,10 @@ class AssetPipeline(Pipeline):
             market=d.get('market', 'Unknown'),
             last_split_factor=d.get('lastSplitFactor', 'Unknown'),
             logo_url=d.get('logo_url', 'Unknown'),
-            etl_loaded_datetime_utc=dt.datetime.utcnow()
-        )
+            etl_created_utc=dt.datetime.utcnow(),
+            etl_updated_utc=dt.datetime.utcnow()
+        )]
         return self.transformed_data
-
-    def load(self):
-        data = self.transformed_data if self.transformed_data else self.transform()
-        new_asset = landing.Asset(**data)
-        session.add(new_asset)
-        session.commit()
 
 
 if __name__ == '__main__':

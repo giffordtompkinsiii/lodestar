@@ -16,19 +16,23 @@ Objects
 tables : list
     table names from the database from which to make objects
 """
-from lodestar.database import engine, logger
-from sqlalchemy import Column, Date, Text
-from sqlalchemy.ext.automap import automap_base
-from sqlalchemy.ext.declarative import declared_attr
-from sqlalchemy import MetaData
+from lodestar.database import engine
 
-landing_metadata = MetaData(bind=engine,
-                            schema='landing')
+from sqlalchemy.ext.automap import automap_base
+from sqlalchemy import MetaData, Column, Date, Text, DateTime
+
+import datetime as dt
+
+
+landing_metadata = MetaData(bind=engine, schema='landing')
 
 Base = automap_base(metadata=landing_metadata)
 
 
 class LandingTable(object):
+    __tablename__ = None
+    meta = landing_metadata
+    metadata = landing_metadata
 
     @classmethod
     def get_conn(cls):
@@ -38,23 +42,25 @@ class LandingTable(object):
     @classmethod
     def truncate_table(cls):
         conn = cls.get_conn()
-        conn.execute(f"TRUNCATE {meta.schema}.{cls.__tablename__}")
+        conn.execute(f"TRUNCATE {cls.meta.schema}.{cls.__tablename__}")
 
     def all_query(self):
         conn = self.__class__.get_conn()
         query = f"SELECT * FROM {self.__class__.metadata.schema}.{self.__tablename__}"
         return conn.execute(query)
 
-    # @classmethod
-    # def drop_table(cls):
-    #     meta = cls.metadata
-    #     conn = meta.bind.engine
-    #     conn.execute(f"DROP TABLE {meta.schema}.{cls.__tablename__}")
+    @classmethod
+    def drop_table(cls):
+        meta = cls.metadata
+        conn = meta.bind.engine
+        conn.execute(f"DROP TABLE {meta.schema}.{cls.__tablename__}")
 
 
 class Asset(Base, LandingTable):
     __tablename__ = 'assets'
     symbol = Column(Text, primary_key=True)
+    etl_created_utc = Column(DateTime, default=dt.datetime.utcnow())
+    etl_updated_utc = Column(DateTime, default=dt.datetime.utcnow())
 
 
 class TidemarkHistory(Base, LandingTable):
@@ -65,11 +71,8 @@ class TidemarkHistory(Base, LandingTable):
 
 class PriceHistory(Base, LandingTable):
     __tablename__ = 'price_history'
-    date = date = Column(Date, primary_key=True)
+    date = Column(Date, primary_key=True)
     symbol = Column(Text, primary_key=True)
 
 
 Base.prepare(reflect=True)
-
-if __name__ == '__main__':
-    pass
