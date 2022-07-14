@@ -23,16 +23,19 @@ Methods
 main(sheet_title)->str
     Export reporting with given title or current date and returns URL.
 """
-# TODO: Build out Google API and use GoogleSheets as first object.
-#TODO: Give GoogleSheets get, put, post, functionality.
-import os
-
-from google.oauth2.credentials import Credentials
-from googleapiclient.discovery import build
-from google_auth_oauthlib.flow import InstalledAppFlow
-from google.auth.transport.requests import Request
 
 from lodestar import data_file_dir
+
+from google.auth.transport.requests import Request
+from google_auth_oauthlib.flow import InstalledAppFlow
+from google.oauth2.credentials import Credentials
+from googleapiclient.discovery import build
+from string import ascii_uppercase
+
+import datetime as dt
+import pandas as pd
+import os
+
 
 class GoogleConfig(object):
     """Class for configuring Google API access.
@@ -71,287 +74,110 @@ class GoogleConfig(object):
 
     """
     SERVICES = [
-        ('drive','v3'),
-        ('spreadsheets','v4')
+        ('drive', 'v3'),
+        ('spreadsheets', 'v4')
     ]
 
     SCOPES = ['https://www.googleapis.com/auth/' + service for service, version in SERVICES]
 
     def __init__(self):
-        self.drive_service = None
-        creds = None
-        self.token_path = os.path.join(data_file_dir, 'token.pickle')
-        self.creds_path = os.path.join(data_file_dir, 'credentials.json')
-        drive_api_url = 'https://developers.google.com/drive/api/v3/quickstart/python'
+        self._token_path = os.path.join(data_file_dir, 'token.pickle')
+        self._creds_path = os.path.join(data_file_dir, 'credentials.json')
 
-        if os.path.exists(self.token_path):
-            creds = Credentials.from_authorized_user_file(self.token_path,
-                                                          self.SCOPES)
+        creds = None
+        if os.path.exists(self._token_path):
+            creds = Credentials.from_authorized_user_file(self._token_path, self.SCOPES)
+
         # If there are no (valid) credentials available, let the user log in.
         if not creds or not creds.valid:
             if creds and creds.expired and creds.refresh_token:
                 creds.refresh(Request())
             else:
-                flow = InstalledAppFlow.from_client_secrets_file(self.creds_path,
-                                                                 self.SCOPES)
+                flow = InstalledAppFlow.from_client_secrets_file(self._creds_path, self.SCOPES)
                 creds = flow.run_local_server(port=0)
             # Save the credentials for the next run
-            with open(self.token_path, 'w') as token:
+            with open(self._token_path, 'w') as token:
                 token.write(creds.to_json())
         self.creds = creds
 
+    # def create_drive_service(self):
+    #     """Build the Google Drive service given the user's credentials."""
+    #     self.drive_service = build('drive', 'v3', credentials=self.creds)
+    #     return self.drive_service
+
+
+class GoogleSheetsService(GoogleConfig):
     def create_sheets_service(self):
         """Build the Google Sheets service given the user's credentials."""
-        self.sheets_service = build('sheets','v4', credentials=self.creds)
-        return self.sheets_service
+        return build('sheets', 'v4', credentials=self.creds)
 
-    def create_drive_service(self):
-        """Build the Google Drive service given the user's credentials."""
-        self.drive_service = build('drive','v3', credentials=self.creds)
-        return self.drive_service
-#
-# class GoogleSheet(GoogleConfig):
-#     def __init__(self, sheet_id):
-#         self.sheet_id = sheet_id
-#
-#     def update_sheet(self,
-#                      sheet_name:str,
-#                      data_object:pd.DataFrame,
-#                      include_update_time:bool = True,
-#                      update_time_offset:int = 0):
-#         data = data_object.copy()
-#         # for col in data.select_dtypes(include=np.datetime64).columns:
-#         #     data[col] = data[col].astype(str)
-#         data = data.astype(str)
-#         data_arrays = []
-#         data_arrays.append(data.columns.to_list())
-#         data_arrays.extend(data.values.tolist())
-#
-#         data_range = f'{sheet_name}!A1:{ascii_uppercase[data.shape[1]]}{data.shape[0]+1}'
-#
-#         body_data = {
-#             'valueInputOption': 'USER_ENTERED',
-#             'data': [
-#                 {
-#                     "values": data_arrays,
-#                     "majorDimension":"ROWS",
-#                     "range":data_range
-#                 }
-#             ]
-#
-#         }
-#         if include_update_time:
-#             body_data['data'].append(
-#                 {
-#                     "values": [[f'Last Updated {dt.datetime.now()}']],
-#                     "majorDimension": "ROWS",
-#                     "range":f'{sheet_name}!{ascii_uppercase[data.shape[1]+1]}1:{ascii_uppercase[data.shape[1] + update_time_offset + 2]}1'
-#                 }
-#             )
-#
-#         google = GoogleConfig()
-#         sheets = google.create_sheets_service()
-#         spreadsheets = sheets.spreadsheets()
-#         ss_values = spreadsheets.values()
-#         clear_request = ss_values.clear(
-#             spreadsheetId=self.sheet_id,
-#             range=data_range
-#         )
-#         try:
-#             request = ss_values.batchUpdate(
-#                 spreadsheetId=self.sheet_id,
-#                 body=body_data
-#             )
-#         except TypeError:
-#             print(sheet_name)
-#             print(data.dtypes)
-#             return
-#         request.execute()
-#
-#
-# class GoogleNewReport(object):
-#     """A Google Sheet workbook to which the reporting will be exported.
-#
-#     The Google Sheet object that holds all the reporting after generation.
-#     This sheet is in a shared folder accessible by the whole team.
-#
-#     Attributes
-#     ----------
-#     folder_id : str
-#         the id of the `Daily Report` folder in Google Drive
-#     file_metadata : dict
-#         the feature dictionary that defines the Google Sheet
-#     resource : dict
-#         feature dictionary of the report after creation
-#     """
-#     def __init__(self, drive_app, file_title):
-#         """
-#         Parameters
-#         ----------
-#         drive_app : googleapiclient.discovery.Resource
-#             A Resource object (see Google documentation for more information).
-#         file_title : str
-#             the name of the Google Sheet to be created
-#         """
-#         self.folder_id = '10WfMUhkSLWs-d6RzTZXbBFzkr2_x4_3K' # Should feed it to this link: https://drive.google.com/drive/folders/10WfMUhkSLWs-d6RzTZXbBFzkr2_x4_3K
-#         self.file_metadata = {
-#             'name':file_title,
-#             'parents':[self.folder_id],
-#             'mimeType':'application/vnd.google-apps.spreadsheet'
-#         }
-#         self.resource = drive_app.files() \
-#             .create(body=self.file_metadata) \
-#             .execute()
-#
-#
-#
-# def main(sheet_title=None):
-#     """Export reporting with given title or current date and returns URL.
-#
-#     Parameters
-#     ----------
-#     sheet_title : str, optional
-#         the title of the sheet to create
-#
-#     Returns
-#     -------
-#     str
-#         A printed url to access the newly exported reporting.
-#     """
-#     daily_reports_file_id = "10WfMUhkSLWs-d6RzTZXbBFzkr2_x4_3K"
-#
-#     if not sheet_title:
-#         # Create title based off the current date.
-#         td = dt.date.today()
-#         current_year = td.year
-#         current_month = td.month
-#         # TODO : Organize reporting by month and year.
-#         # current_report_folder_name = f"{str(current_month).zfill(2)}_{cal.month_name[current_month]}"
-#
-#         sheet_title = f"{str(td.day).zfill(2)}_{cal.month_abbr[td.month]}_{td.year}"
-#
-#     google = GoogleConfig()
-#     drive = google.create_drive_service()
-#     sheets = google.create_sheets_service()
-#     report = GoogleNewReport(drive, sheet_title)
-#
-#     spreadsheet_id = report.resource['id']
-#
-#     report_list = [ #(Google Sheet Page Title, report_title.csv)
-#         ('Believability','believability.csv'),
-#         ('Drop Report', 'drop_report.csv'),
-#         ('Pop Report', 'pop_report.csv'),
-#         ('Qtrly Tidemarks', 'tm_qtrly.csv'),
-#         ('Daily Tidemarks', 'tm_daily.csv'),
-#         ('Tidemark By Type', 'tm_by_type.csv'),
-#         ('Ideal Portfolio', 'ideal_portfolio.csv')
-#     ]
-#
-#     # Create a sheet for each report in report_list.
-#     requests = [
-#         {
-#             "addSheet" : {
-#                 "properties" : {
-#                     "title" : r[0],
-#                     "sheetId": i + 1,
-#                     "index": i + 1,
-#                     "sheetType": "GRID"
-#                 }
-#             }
-#         } for i, r in enumerate(report_list)]
-#
-#     # Delete the initial blank page automatically generated by the API
-#     requests += [
-#         {
-#             "deleteSheet":{
-#                 "sheetId": 0}
-#         }
-#     ]
-#
-#     # Insert data from the reporting into the created sheets.
-#     # TODO: Confirm that reporting directory is properly mapped.
-#     requests += [
-#         {
-#             "pasteData": {
-#                 "coordinate": {
-#                     "sheetId": i + 1,
-#                     "rowIndex": 0,
-#                     "columnIndex": 0
-#                 },
-#                 "data": open(f'./reports/{r[1]}','r').read(),
-#                 "type": "PASTE_VALUES",
-#                 "delimiter": ","
-#             }
-#         } for i, r in enumerate(report_list) if os.path.exists(f'../reporting/{r[1]}')]
-#
-#     batch_request = {
-#         "requests": requests,
-#         "includeSpreadsheetInResponse": True
-#     }
-#
-#     # Execute the batch request through the API
-#     response = sheets.spreadsheets().batchUpdate(spreadsheetId=spreadsheet_id, body=batch_request).execute()
-#     return f"`Cmd+Click` the following link for report: https://docs.google.com/spreadsheets/d/{report.resource['id']}"
-#
-#
-# def update_sheet(sheet_id: str,
-#                  sheet_name:str,
-#                  data_object:pd.DataFrame,
-#                  include_update_time:bool = True,
-#                  update_time_offset:int = 0):
-#     data = data_object.copy()
-#     # for col in data.select_dtypes(include=np.datetime64).columns:
-#     #     data[col] = data[col].astype(str)
-#     data = data.astype(str)
-#     data_arrays = []
-#     data_arrays.append(data.columns.to_list())
-#     data_arrays.extend(data.values.tolist())
-#
-#     data_range = f'{sheet_name}!A1:{ascii_uppercase[data.shape[1]]}{data.shape[0]+1}'
-#     clear_range = f'{sheet_name}!A:{ascii_uppercase[data.shape[1] - 1]}'
-#
-#     body_data = {
-#         'valueInputOption': 'USER_ENTERED',
-#         'data': [
-#             {
-#                 "values": data_arrays,
-#                 "majorDimension":"ROWS",
-#                 "range":data_range
-#             }
-#         ]
-#
-#     }
-#     offset = update_time_offset
-#     if include_update_time:
-#         range_str = f'{sheet_name}!{ascii_uppercase[data.shape[1] + offset + 2]}1'
-#         body_data['data'].append(
-#             {
-#                 "values": [[f'Last Updated {dt.datetime.now()}']],
-#                 "majorDimension": "ROWS",
-#                 "range": range_str
-#             }
-#         )
-#
-#     google = GoogleConfig()
-#     sheets = google.create_sheets_service()
-#     spreadsheets = sheets.spreadsheets()
-#     ss_values = spreadsheets.values()
-#     clear_request = ss_values.clear(
-#         spreadsheetId=sheet_id,
-#         range=clear_range
-#     )
-#
-#     print(clear_request.execute()['clearedRange'], "cleared")
-#     try:
-#         request = ss_values.batchUpdate(
-#             spreadsheetId=sheet_id,
-#             body=body_data
-#         )
-#     except TypeError:
-#         print(sheet_name)
-#         print(data.dtypes)
-#         return
-#     request.execute()
-#
-# if __name__=="__main__":
-#     main(sheet_title)
+    @staticmethod
+    def get_data_range(sheet_name, dataframe):
+        return f'{sheet_name}!A1:{ascii_uppercase[dataframe.shape[1]]}{dataframe.shape[0] + 1}'
+
+    @staticmethod
+    def data_to_str_array(data):
+        return data.astype(str).to_numpy()
+
+    @staticmethod
+    def data_to_array(data):
+        return data.to_numpy()
+
+    def get_body_data(self, sheet_name, dataframe):
+        data_arrays = self.data_to_str_array(dataframe)
+
+        return {
+            'valueInputOption': 'USER_ENTERED',
+            'data': [{
+                "values": dataframe.astype(str).values.tolist(), # data_arrays,
+                "majorDimension": "ROWS",
+                "range": self.get_data_range(sheet_name=sheet_name, dataframe=dataframe)
+            }, {
+                "values": [[f'Last Updated {dt.datetime.now()}']],
+                "majorDimension": "ROWS",
+                "range": (f'{sheet_name}!'
+                          + f'{ascii_uppercase[data_arrays.shape[1] + 1]}1:'
+                          + f'{ascii_uppercase[data_arrays.shape[1] + 2]}1')
+            }]}
+
+    def __init__(self, sheet_id):
+        super().__init__()
+        self.sheet_id = sheet_id
+
+        self._spreadsheets_service = self.create_sheets_service()
+        self.spreadsheets = self._spreadsheets_service.spreadsheets()
+        self.values = self.spreadsheets.values()
+
+    def _clear_sheet(self, data_range):
+        self.values.clear(spreadsheetId=self.sheet_id, range=data_range)
+
+    def update_sheet(self, sheet_name: str, dataframe: pd.DataFrame):
+
+        body_data = self.get_body_data(sheet_name=sheet_name, dataframe=dataframe)
+        data_range = self.get_data_range(sheet_name=sheet_name, dataframe=dataframe)
+
+        # Clear sheet of data.
+        self._clear_sheet(data_range=data_range)
+
+        # Attempt to post data.
+        # try:
+        request = self.values.batchUpdate(
+            spreadsheetId=self.sheet_id,
+            body=body_data
+        )
+        # except TypeError:
+        #     print(sheet_name)
+        #     print(dataframe.dtypes)
+        #     return
+        request.execute()
+
+
+if __name__ == '__main__':
+    import pandas as pd
+    import numpy as np
+
+    test_id = '1O_zmm_H4GbPU4e07lX2jIPbCMSKuu3L_5vwlEt2OrPk'
+    g = GoogleSheetsService(test_id)
+    sheet_name = 'Sheet 69'
+    df = pd.DataFrame(np.random.randint(0, 100, size=(100, 4)), columns=list('ABCD'))
+    g.update_sheet(sheet_name, df)
